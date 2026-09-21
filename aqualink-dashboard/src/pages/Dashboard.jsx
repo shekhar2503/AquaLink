@@ -67,9 +67,9 @@ const getDisplayTalukaName = (taluka) => {
 ========================================================= */
 
 const getRiskLevel = (score) => {
-  if (score >= 32) return "Critical";
-  if (score >= 30) return "High";
-  if (score >= 28) return "Moderate";
+  if (score >= 65) return "Critical";
+  if (score >= 45) return "High";
+  if (score >= 25) return "Moderate";
   return "Low";
 };
 
@@ -115,28 +115,29 @@ const RiskDistribution = ({ distribution, total }) => {
     {
       name: "Low",
       value: low,
-      range: "Score 0–27",
+      range: "Score 0–24",
       className: "distribution-low",
     },
     {
       name: "Moderate",
       value: moderate,
-      range: "Score 28–29",
+      range: "Score 25–44",
       className: "distribution-moderate",
     },
     {
       name: "High",
       value: high,
-      range: "Score 30–31",
+      range: "Score 45–64",
       className: "distribution-high",
     },
     {
       name: "Critical",
       value: critical,
-      range: "Score 32+",
+      range: "Score 65+",
       className: "distribution-critical",
     },
   ];
+
 
   return (
     <section className="dashboard-section">
@@ -441,12 +442,13 @@ export default function Dashboard() {
     ----------------------------------------------------- */
 
     const highRiskTalukas = talukas.filter(
-      (item) => item.score >= 30 && item.score < 32
+      (item) => item.score >= 45 && item.score < 65
     ).length;
 
     const criticalTalukas = talukas.filter(
-      (item) => item.score >= 32
+      (item) => item.score >= 65
     ).length;
+
 
     return {
       totalLocations,
@@ -521,17 +523,20 @@ export default function Dashboard() {
       =================================================== */}
 
       <header className="dashboard-header">
-        <div>
-          <span className="brand-eyebrow">
-            AQUA-LINK • DECISION SUPPORT SYSTEM
-          </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <img src="/logo.png" alt="AquaLink Logo" style={{ width: "48px", height: "48px", objectFit: "contain", borderRadius: "50%" }} />
+          <div>
+            <span className="brand-eyebrow">
+              AQUA-LINK • DECISION SUPPORT SYSTEM
+            </span>
 
-          <h1>Pune Water Intelligence</h1>
+            <h1>Pune Water Intelligence</h1>
 
-          <p>
-            District-wide water stress monitoring and
-            intervention prioritization
-          </p>
+            <p>
+              District-wide water stress monitoring and
+              intervention prioritization
+            </p>
+          </div>
         </div>
 
         <div className="dataset-status">
@@ -580,11 +585,12 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="hero-water-decoration">
-          💧
+        <div className="hero-water-decoration" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <img src="/logo.png" alt="AquaLink Logo" style={{ width: "110px", height: "110px", objectFit: "cover", borderRadius: "50%", border: "3px solid rgba(255,255,255,0.8)", boxShadow: "0 10px 30px rgba(15,23,42,0.15)" }} />
         </div>
 
       </section>
+
 
       {/* ===================================================
           KPI CARDS
@@ -776,25 +782,26 @@ export default function Dashboard() {
 
             <div>
               <span className="legend-dot low" />
-              Low ≤ 27
+              Low &lt; 25
             </div>
 
             <div>
               <span className="legend-dot moderate" />
-              Moderate 28–29
+              Moderate 25–44
             </div>
 
             <div>
               <span className="legend-dot high" />
-              High 30–31
+              High 45–64
             </div>
 
             <div>
               <span className="legend-dot critical" />
-              Critical 32+
+              Critical 65+
             </div>
 
           </div>
+
 
         </div>
       </section>

@@ -1,47 +1,81 @@
 import Papa from "papaparse";
 
+const API_BASE_URL = "http://localhost:8000";
+
 /*
-  Load individual Pune locations
-  Used by Risk Map and Dashboard
+  AquaLink Standardized Risk Level Helper
+  AquaLink project-defined risk classification thresholds:
+  - Low: 0 <= Score < 25
+  - Moderate: 25 <= Score < 45
+  - High: 45 <= Score < 65
+  - Critical: 65 <= Score <= 100
 */
-export async function loadPuneData() {
+export function getStandardizedRiskLevel(score) {
+  const value = Number(score || 0);
+  if (value >= 65) return "Critical";
+  if (value >= 45) return "High";
+  if (value >= 25) return "Moderate";
+  return "Low";
+}
 
+/*
+  Load Pune / District locations.
+  Primary: FastAPI backend /hotspots
+  Fallback: Local /aqualinkData.csv
+*/
+export async function loadPuneData(district = "pune") {
+  // Primary attempt: FastAPI backend
+  try {
+    const apiRes = await fetch(`${API_BASE_URL}/hotspots?district=${encodeURIComponent(district)}&limit=5000`);
+    if (apiRes.ok) {
+      const data = await apiRes.json();
+      if (Array.isArray(data?.results) && data.results.length > 0) {
+        console.log(`[AquaLink Data Layer] Loaded ${data.results.length} records from FastAPI backend`);
+        return data.results.map((row) => ({
+          ...row,
+          Latitude: Number(row.Latitude),
+          Longitude: Number(row.Longitude),
+          Water_Stress_Score: Number(row.Water_Stress_Score || 0),
+          Risk_Category: getStandardizedRiskLevel(row.Water_Stress_Score),
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn("[AquaLink Data Layer] FastAPI backend unavailable, falling back to static CSV:", err.message);
+  }
+
+  // Fallback: Local CSV
   const response = await fetch("/aqualinkData.csv");
-
   const csvText = await response.text();
 
   const result = Papa.parse(csvText, {
     header: true,
     dynamicTyping: true,
-    skipEmptyLines: true
+    skipEmptyLines: true,
   });
 
-  // Keep only Pune records
-  const puneData = result.data.filter(
+  const filteredData = result.data.filter(
     (row) =>
       row.District &&
-      String(row.District).trim().toLowerCase() === "pune"
+      String(row.District).trim().toLowerCase() === district.toLowerCase()
   );
 
-  // Find latest year
-  const validYears = puneData
+  const validYears = filteredData
     .map((row) => Number(row.Year))
     .filter((year) => !isNaN(year));
 
   if (!validYears.length) {
-    console.error("No valid years found in Pune data");
+    console.error(`No valid years found in ${district} data`);
     return [];
   }
 
   const latestYear = Math.max(...validYears);
 
-  // Keep latest year
-  const latestPuneData = puneData.filter(
+  const latestData = filteredData.filter(
     (row) => Number(row.Year) === latestYear
   );
 
-  // Keep individual locations
-  const locationData = latestPuneData
+  const locationData = latestData
     .filter(
       (row) =>
         !isNaN(Number(row.Latitude)) &&
@@ -49,117 +83,77 @@ export async function loadPuneData() {
     )
     .map((row) => ({
       ...row,
-
       Latitude: Number(row.Latitude),
-
       Longitude: Number(row.Longitude),
-
-      Water_Stress_Score:
-        Number(row.Water_Stress_Score || 0)
+      Water_Stress_Score: Number(row.Water_Stress_Score || 0),
+      Risk_Category: getStandardizedRiskLevel(row.Water_Stress_Score),
     }));
 
-  console.log(
-    "Pune total records:",
-    puneData.length
-  );
-
-  console.log(
-    "Latest year:",
-    latestYear
-  );
-
-  console.log(
-    "Pune locations displayed:",
-    locationData.length
-  );
-
+  console.log(`[AquaLink Data Layer] Fallback loaded ${locationData.length} records from aqualinkData.csv`);
   return locationData;
 }
 
-
 /*
-  Load historical Pune data
-  Used by Forecast and historical charts
+  Load historical data for forecasting and trend analysis.
+  Primary: FastAPI backend /api/forecast/district
+  Fallback: Local /aqualinkData.csv
 */
-export async function loadPuneHistoricalData() {
+export async function loadPuneHistoricalData(district = "pune") {
+  try {
+    const apiRes = await fetch(`${API_BASE_URL}/api/forecast/district?district=${encodeURIComponent(district)}`);
+    if (apiRes.ok) {
+      const data = await apiRes.json();
+      if (Array.isArray(data?.historical_fitted) && data.historical_fitted.length > 0) {
+        console.log("[AquaLink Data Layer] Loaded historical forecast series from FastAPI OLS model");
+        return data.historical_fitted.map((item) => ({
+          Year: item.year,
+          Water_Stress_Score: item.actual_score,
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn("[AquaLink Data Layer] FastAPI forecast endpoint unavailable, falling back to static CSV:", err.message);
+  }
 
   const response = await fetch("/aqualinkData.csv");
-
   const csvText = await response.text();
 
   const result = Papa.parse(csvText, {
     header: true,
     dynamicTyping: true,
-    skipEmptyLines: true
+    skipEmptyLines: true,
   });
 
-  // Keep only Pune records
-  const puneData = result.data.filter(
+  const filteredData = result.data.filter(
     (row) =>
       row.District &&
-      String(row.District).trim().toLowerCase() === "pune"
+      String(row.District).trim().toLowerCase() === district.toLowerCase()
   );
 
-  // Group scores by year
   const yearMap = new Map();
 
-  puneData.forEach((row) => {
-
+  filteredData.forEach((row) => {
     const year = Number(row.Year);
+    const score = Number(row.Water_Stress_Score);
 
-    const score =
-      Number(row.Water_Stress_Score);
-
-    if (
-      isNaN(year) ||
-      isNaN(score)
-    ) {
-      return;
-    }
+    if (isNaN(year) || isNaN(score)) return;
 
     if (!yearMap.has(year)) {
       yearMap.set(year, []);
     }
-
-    yearMap
-      .get(year)
-      .push(score);
-
+    yearMap.get(year).push(score);
   });
 
-  // Calculate yearly average
-  const historicalData = Array.from(
-    yearMap.entries()
-  )
+  const historicalData = Array.from(yearMap.entries())
     .map(([year, scores]) => {
-
-      const average =
-        scores.reduce(
-          (sum, score) =>
-            sum + score,
-          0
-        ) / scores.length;
-
+      const average = scores.reduce((sum, s) => sum + s, 0) / scores.length;
       return {
         Year: year,
-
-        Water_Stress_Score:
-          Number(average.toFixed(1)),
-
-        Record_Count:
-          scores.length
+        Water_Stress_Score: Number(average.toFixed(1)),
+        Record_Count: scores.length,
       };
-
     })
-    .sort(
-      (a, b) =>
-        a.Year - b.Year
-    );
-
-  console.log(
-    "Pune historical data:",
-    historicalData
-  );
+    .sort((a, b) => a.Year - b.Year);
 
   return historicalData;
 }

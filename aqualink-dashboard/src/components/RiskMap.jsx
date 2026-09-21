@@ -29,12 +29,13 @@ const PUNE_CENTER = [18.5204, 73.8567];
 function getRiskLevel(score) {
   const value = Number(score);
 
-  if (value >= 32) return "Critical";
-  if (value >= 30) return "High";
-  if (value >= 28) return "Moderate";
+  if (value >= 65) return "Critical";
+  if (value >= 45) return "High";
+  if (value >= 25) return "Moderate";
 
   return "Low";
 }
+
 
 
 function getRiskColor(risk) {

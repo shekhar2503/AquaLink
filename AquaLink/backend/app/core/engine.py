@@ -95,16 +95,88 @@ def risk_category(score: float) -> str:
     return "Critical"
 
 
-def recommended_action(gw_score: float, supply_score: float) -> str:
-    gw_high = gw_score >= 50
-    supply_high = supply_score >= 50
+def recommended_action(gw_score: float, supply_score: float, trend: str = "Stable") -> str:
+    """
+    Cause-and-effect decision matrix for interventions:
+    Evaluates underlying stress drivers (Groundwater Extraction vs Supply Gap)
+    and trend direction to output actionable intervention guidance.
+    """
+    gw_high = gw_score >= 45.0
+    supply_high = supply_score >= 45.0
+    is_declining = trend in ["Declining (Worsening)", "Declining"]
+
     if gw_high and supply_high:
         return "Groundwater recharge + Water-supply augmentation"
-    if gw_high and not supply_high:
-        return "Groundwater conservation + Extraction management"
-    if not gw_high and supply_high:
-        return "Improve water-supply infrastructure"
+    elif gw_high and not supply_high:
+        if is_declining:
+            return "Urgent groundwater recharge & artificial extraction controls"
+        return "Groundwater conservation & extraction management"
+    elif not gw_high and supply_high:
+        return "Improve piped water-supply infrastructure & LPCD distribution"
+    elif is_declining:
+        return "Increase groundwater table monitoring & rainwater harvesting"
     return "Monitor & maintain (low priority)"
+
+
+def explain_score(indicators: RawIndicators) -> dict:
+    """
+    Generates dynamic score explainability breakdown detailing exact
+    contributions of Groundwater, Supply Gap, and Compound Interaction.
+    """
+    gw = groundwater_stress_score(
+        indicators.gw_extraction_stage_pct,
+        indicators.seasonal_fluctuation_m,
+        indicators.gw_trend,
+    )
+    supply = water_supply_gap_score(
+        indicators.piped_coverage_pct,
+        indicators.supply_gap_pct,
+    )
+    combined = combined_water_stress_score(gw, supply)
+    risk = risk_category(combined)
+    action = recommended_action(gw, supply, indicators.gw_trend)
+
+    gw_contrib = round(0.45 * gw, 1)
+    supply_contrib = round(0.45 * supply, 1)
+    interaction_contrib = round(0.10 * (gw * supply) / 100, 1)
+
+    tot = max(gw_contrib + supply_contrib + interaction_contrib, 0.1)
+    gw_pct_share = round((gw_contrib / tot) * 100, 1)
+    supply_pct_share = round((supply_contrib / tot) * 100, 1)
+    interaction_pct_share = round((interaction_contrib / tot) * 100, 1)
+
+    contributors = []
+    if indicators.gw_extraction_stage_pct >= 90:
+        contributors.append(f"High GW Extraction ({indicators.gw_extraction_stage_pct}% stage)")
+    if indicators.seasonal_fluctuation_m >= 8:
+        contributors.append(f"High Seasonal Fluctuation ({indicators.seasonal_fluctuation_m}m)")
+    if indicators.gw_trend in ["Declining (Worsening)", "Declining"]:
+        contributors.append("Declining GW Table Trend (+6pt penalty)")
+    if indicators.piped_coverage_pct < 80:
+        contributors.append(f"Low Piped Tap Coverage ({indicators.piped_coverage_pct}%)")
+    if indicators.supply_gap_pct > 15:
+        contributors.append(f"Significant Supply Deficit ({indicators.supply_gap_pct}% vs norm)")
+
+    if not contributors:
+        contributors.append("All monitored indicators within normal parameters")
+
+    return {
+        "water_stress_score": combined,
+        "risk_category": risk,
+        "risk_classification_standard": "AquaLink project-defined risk classification thresholds",
+        "groundwater_stress_score": gw,
+        "water_supply_gap_score": supply,
+        "breakdown": {
+            "groundwater_contribution": gw_contrib,
+            "groundwater_percentage_share": gw_pct_share,
+            "supply_gap_contribution": supply_contrib,
+            "supply_gap_percentage_share": supply_pct_share,
+            "interaction_contribution": interaction_contrib,
+            "interaction_percentage_share": interaction_pct_share,
+        },
+        "main_contributors": contributors,
+        "recommended_action": action,
+    }
 
 
 def score_area(indicators: RawIndicators) -> StressScores:
@@ -124,5 +196,6 @@ def score_area(indicators: RawIndicators) -> StressScores:
         water_supply_gap_score=supply,
         water_stress_score=combined,
         risk_category=risk_category(combined),
-        recommended_action=recommended_action(gw, supply),
+        recommended_action=recommended_action(gw, supply, indicators.gw_trend),
     )
+

@@ -37,67 +37,76 @@ function Recommendations() {
       0
     ) / data.length;
 
-  // Highest-risk locations
+  // Priority locations (High or Critical, or top scored if all moderate)
   const highRiskLocations = [...data]
-    .filter(
-      (item) =>
-        Number(item.Water_Stress_Score) >= 30
-    )
-    .sort(
-      (a, b) =>
-        Number(b.Water_Stress_Score) -
-        Number(a.Water_Stress_Score)
-    );
+    .sort((a, b) => Number(b.Water_Stress_Score || 0) - Number(a.Water_Stress_Score || 0));
 
   const getRiskLevel = (score) => {
-
     const value = Number(score);
-
-    if (value <= 27) return "Low";
-    if (value <= 29) return "Moderate";
-    if (value <= 31) return "High";
-
-    return "Critical";
+    if (value >= 65) return "Critical";
+    if (value >= 45) return "High";
+    if (value >= 25) return "Moderate";
+    return "Low";
   };
 
-  const getRecommendation = (score) => {
-
-    const value = Number(score);
-
-    if (value >= 32) {
+  const getRecommendation = (area) => {
+    if (area?.Recommended_Action && area.Recommended_Action !== "") {
       return {
-        action: "Immediate Water Conservation",
-        reason:
-          "Critical water stress requires immediate intervention and demand reduction.",
-        priority: "Critical"
+        action: area.Recommended_Action,
+        reason: `Targeted intervention based on recorded Groundwater Extraction Stage (${area.GW_Extraction_Stage_pct || 'N/A'}%) and Piped Coverage (${area.Piped_Water_Coverage_pct || 'N/A'}%).`,
+        priority: getRiskLevel(area.Water_Stress_Score),
       };
     }
 
-    if (value >= 30) {
+    const gwStage = Number(area.GW_Extraction_Stage_pct || 0);
+    const coverage = Number(area.Piped_Water_Coverage_pct || 100);
+    const trend = String(area.GW_Historical_Trend || "Stable");
+
+    const gwHigh = gwStage >= 90;
+    const supplyHigh = coverage < 75;
+    const isDeclining = trend.includes("Declining");
+
+    if (gwHigh && supplyHigh) {
       return {
-        action: "Increase Groundwater Monitoring",
-        reason:
-          "High stress indicates the need for closer monitoring and conservation measures.",
-        priority: "High"
+        action: "Groundwater recharge + Water-supply augmentation",
+        reason: "Compound stress detected: high groundwater extraction stage combined with piped water supply shortfall.",
+        priority: "Critical",
       };
     }
 
-    if (value >= 28) {
+    if (gwHigh) {
       return {
-        action: "Promote Rainwater Harvesting",
-        reason:
-          "Moderate stress can be addressed through recharge and efficient water use.",
-        priority: "Medium"
+        action: isDeclining
+          ? "Urgent groundwater recharge & artificial extraction controls"
+          : "Groundwater conservation & extraction management",
+        reason: "Groundwater extraction exceeds safety norms; demands artificial recharge structures and irrigation efficiency.",
+        priority: "High",
+      };
+    }
+
+    if (supplyHigh) {
+      return {
+        action: "Improve piped water-supply infrastructure & LPCD distribution",
+        reason: "Sub-norm per capita piped supply coverage requires distribution network expansion under Jal Jeevan Mission.",
+        priority: "High",
+      };
+    }
+
+    if (isDeclining) {
+      return {
+        action: "Increase groundwater table monitoring & rainwater harvesting",
+        reason: "Declining 5-year water table trend indicates emerging vulnerability.",
+        priority: "Medium",
       };
     }
 
     return {
-      action: "Continue Monitoring",
-      reason:
-        "Current stress is relatively low but should continue to be monitored.",
-      priority: "Low"
+      action: "Monitor & maintain (low priority)",
+      reason: "Current indicators operate within acceptable baseline safety thresholds.",
+      priority: "Low",
     };
   };
+
 
   return (
 
@@ -212,10 +221,8 @@ function Recommendations() {
             .slice(0, 6)
             .map((area, index) => {
 
-              const recommendation =
-                getRecommendation(
-                  area.Water_Stress_Score
-                );
+              const recommendation = getRecommendation(area);
+
 
               const taluka =
                 talukaNames[area.Taluka] ||

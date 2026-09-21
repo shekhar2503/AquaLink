@@ -53,23 +53,14 @@ function MapPage() {
   // =========================================
 
   const getRiskLevel = (score) => {
-
     const value = Number(score);
 
-    if (value <= 27) {
-      return "Low";
-    }
-
-    if (value <= 29) {
-      return "Moderate";
-    }
-
-    if (value <= 31) {
-      return "High";
-    }
-
-    return "Critical";
+    if (value >= 65) return "Critical";
+    if (value >= 45) return "High";
+    if (value >= 25) return "Moderate";
+    return "Low";
   };
+
 
 
   // =========================================
@@ -144,53 +135,23 @@ function MapPage() {
   // =========================================
 
   const lowRisk = data.filter(
-    (item) =>
-      Number(
-        item.Water_Stress_Score
-      ) <= 27
+    (item) => Number(item.Water_Stress_Score) < 25
   ).length;
 
+  const moderateRisk = data.filter((item) => {
+    const score = Number(item.Water_Stress_Score);
+    return score >= 25 && score < 45;
+  }).length;
 
-  const moderateRisk = data.filter(
-    (item) => {
-
-      const score =
-        Number(
-          item.Water_Stress_Score
-        );
-
-      return (
-        score >= 28 &&
-        score <= 29
-      );
-
-    }
-  ).length;
-
-
-  const highRisk = data.filter(
-    (item) => {
-
-      const score =
-        Number(
-          item.Water_Stress_Score
-        );
-
-      return (
-        score >= 30 &&
-        score <= 31
-      );
-
-    }
-  ).length;
-
+  const highRisk = data.filter((item) => {
+    const score = Number(item.Water_Stress_Score);
+    return score >= 45 && score < 65;
+  }).length;
 
   const criticalRisk = data.filter(
-    (item) =>
-      Number(
-        item.Water_Stress_Score
-      ) >= 32
+    (item) => Number(item.Water_Stress_Score) >= 65
   ).length;
+
 
 
   // =========================================
@@ -560,7 +521,7 @@ function MapPage() {
             </span>
 
             <small>
-              0–27
+              0–24
             </small>
 
           </div>
@@ -575,7 +536,7 @@ function MapPage() {
             </span>
 
             <small>
-              28–29
+              25–44
             </small>
 
           </div>
@@ -590,7 +551,7 @@ function MapPage() {
             </span>
 
             <small>
-              30–31
+              45–64
             </small>
 
           </div>
@@ -605,10 +566,11 @@ function MapPage() {
             </span>
 
             <small>
-              32+
+              65+
             </small>
 
           </div>
+
 
 
         </div>

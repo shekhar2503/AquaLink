@@ -338,28 +338,15 @@ function Forecast() {
   // =========================================
 
   const getRiskLevel = (score) => {
-
     const value = Number(score);
 
+    if (value >= 65) return "Critical";
+    if (value >= 45) return "High";
+    if (value >= 25) return "Moderate";
 
-    if (value <= 27) {
-      return "Low";
-    }
-
-
-    if (value <= 29) {
-      return "Moderate";
-    }
-
-
-    if (value <= 31) {
-      return "High";
-    }
-
-
-    return "Critical";
-
+    return "Low";
   };
+
 
 
   // =========================================
@@ -485,8 +472,9 @@ function Forecast() {
 
 
         <div className="forecast-badge">
-          Data-Driven
+          Statistical OLS Model
         </div>
+
 
       </div>
 
@@ -694,16 +682,17 @@ function Forecast() {
               {/* CRITICAL THRESHOLD */}
 
               <ReferenceLine
-                y={32}
+                y={65}
                 stroke="#dc2626"
                 strokeDasharray="6 6"
                 label={{
                   value:
-                    "Critical ≥32",
+                    "Critical ≥65",
                   position:
                     "insideTopRight",
                 }}
               />
+
 
 
               {/* HISTORICAL */}
@@ -775,9 +764,10 @@ function Forecast() {
               className="forecast-legend-dot critical"
             ></span>
 
-            Critical threshold ≥32
+            Critical threshold ≥65
 
           </div>
+
 
         </div>
 

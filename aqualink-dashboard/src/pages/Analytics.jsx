@@ -101,22 +101,13 @@ function Analytics() {
   // =====================================================
 
   const getRiskLevel = (score) => {
-
-    if (score <= 27) {
-      return "Low";
-    }
-
-    if (score <= 29) {
-      return "Moderate";
-    }
-
-    if (score <= 31) {
-      return "High";
-    }
-
-    return "Critical";
-
+    const value = Number(score);
+    if (value >= 65) return "Critical";
+    if (value >= 45) return "High";
+    if (value >= 25) return "Moderate";
+    return "Low";
   };
+
 
 
   // =====================================================

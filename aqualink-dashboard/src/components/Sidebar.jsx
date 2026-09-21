@@ -34,9 +34,10 @@ function Sidebar() {
 
       <div className="sidebar-brand">
 
-        <div className="brand-icon">
-          💧
+        <div className="brand-icon" style={{ overflow: "hidden", padding: 0, background: "transparent", width: "42px", height: "42px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <img src="/logo.png" alt="AquaLink Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
         </div>
+
 
         <div>
           <h2>AquaLink</h2>
