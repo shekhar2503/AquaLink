@@ -1,1154 +1,246 @@
 import { useEffect, useMemo, useState } from "react";
-
 import {
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  Legend,
-  BarChart,
+  AlertTriangle,
+  BarChart3,
+  CircleCheck,
+  Gauge,
+  Search,
+  ShieldAlert,
+} from "lucide-react";
+import {
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid
 } from "recharts";
-
+import FadeInUp from "../components/FadeInUp";
+import {
+  EmptyState,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  SectionHeading,
+  StatusBadge,
+} from "../components/ui";
 import { loadPuneData } from "../utils/loadAquaLinkData";
-import { talukaNames } from "../utils/talukaNames";
+import {
+  getRiskLevel,
+  getTalukaName,
+  getWaterScore,
+  RISK_COLORS,
+} from "../utils/waterMetrics";
 
+const chartTooltipStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: "12px",
+  color: "var(--text)",
+  boxShadow: "var(--shadow-card)",
+};
 
 function Analytics() {
-
   const [data, setData] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [riskFilter, setRiskFilter] = useState("All");
   const [loading, setLoading] = useState(true);
-
-
-  // =====================================================
-  // LOAD ALL DATA
-  // =====================================================
+  const [error, setError] = useState("");
 
   useEffect(() => {
-
+    let active = true;
     loadPuneData()
       .then((result) => {
-
-        if (Array.isArray(result)) {
-          setData(result);
-        } else {
-          setData([]);
-        }
-
-        setLoading(false);
-
+        if (active) setData(Array.isArray(result) ? result : []);
       })
-      .catch((error) => {
-
-        console.error(
-          "Error loading analytics data:",
-          error
-        );
-
-        setData([]);
-        setLoading(false);
-
+      .catch((loadError) => {
+        console.error("Error loading analytics data:", loadError);
+        if (active) setError("The analytics dataset could not be loaded.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-
+    return () => {
+      active = false;
+    };
   }, []);
 
+  const analyticsData = useMemo(
+    () =>
+      data.map((item, index) => {
+        const score = getWaterScore(item);
+        return {
+          id: `${item.location_id ?? index}-${index}`,
+          taluka: getTalukaName(item),
+          village: item.Village_Ward || "Monitored location",
+          score,
+          risk: getRiskLevel(score),
+        };
+      }),
+    [data],
+  );
 
-  // =====================================================
-  // TALUKA NAME
-  // =====================================================
-
-  const getTalukaName = (item) => {
-
-    const taluka =
-      item?.Taluka !== undefined &&
-      item?.Taluka !== null
-        ? String(item.Taluka).trim()
-        : "";
-
-    return (
-      talukaNames[taluka] ||
-      taluka ||
-      "Unknown Taluka"
-    );
-
-  };
-
-
-  // =====================================================
-  // SCORE
-  // =====================================================
-
-  const getScore = (item) => {
-
-    const score =
-      Number(item?.Water_Stress_Score);
-
-    return Number.isFinite(score)
-      ? score
-      : 0;
-
-  };
-
-
-  // =====================================================
-  // RISK LEVEL
-  // =====================================================
-
-  const getRiskLevel = (score) => {
-    const value = Number(score);
-    if (value >= 65) return "Critical";
-    if (value >= 45) return "High";
-    if (value >= 25) return "Moderate";
-    return "Low";
-  };
-
-
-
-  // =====================================================
-  // NORMALIZED DATA
-  // =====================================================
-
-  const analyticsData = useMemo(() => {
-
-    return data.map((item, index) => {
-
-      const score = getScore(item);
-
-      return {
-        id: index,
-        taluka: getTalukaName(item),
-        score: score,
-        risk: getRiskLevel(score)
-      };
-
+  const summary = useMemo(() => {
+    const counts = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    analyticsData.forEach((item) => {
+      counts[item.risk] += 1;
     });
-
-  }, [data]);
-
-
-  // =====================================================
-  // RISK COUNTS
-  // =====================================================
-
-  const lowCount =
-    analyticsData.filter(
-      item => item.risk === "Low"
-    ).length;
-
-  const moderateCount =
-    analyticsData.filter(
-      item => item.risk === "Moderate"
-    ).length;
-
-  const highCount =
-    analyticsData.filter(
-      item => item.risk === "High"
-    ).length;
-
-  const criticalCount =
-    analyticsData.filter(
-      item => item.risk === "Critical"
-    ).length;
-
-
-  const totalTalukas =
-    analyticsData.length;
-
-
-  // =====================================================
-  // AVERAGE
-  // =====================================================
-
-  const averageStress =
-    totalTalukas > 0
-      ? analyticsData.reduce(
-          (sum, item) =>
-            sum + item.score,
-          0
-        ) / totalTalukas
+    const average = analyticsData.length
+      ? analyticsData.reduce((sum, item) => sum + item.score, 0) / analyticsData.length
       : 0;
-
-
-  // =====================================================
-  // PRIORITY
-  // =====================================================
-
-  const priorityCount =
-    highCount + criticalCount;
-
-
-  const priorityPercentage =
-    totalTalukas > 0
-      ? (
-          priorityCount /
-          totalTalukas *
-          100
-        ).toFixed(1)
-      : "0.0";
-
-
-  // =====================================================
-  // PIE DATA
-  // =====================================================
-
-  const riskDistribution = [
-
-    {
-      name: "Low",
-      value: lowCount
-    },
-
-    {
-      name: "Moderate",
-      value: moderateCount
-    },
-
-    {
-      name: "High",
-      value: highCount
-    },
-
-    {
-      name: "Critical",
-      value: criticalCount
-    }
-
-  ];
-
-
-  const riskColors = {
-
-    Low: "#16a34a",
-
-    Moderate: "#eab308",
-
-    High: "#f97316",
-
-    Critical: "#dc2626"
-
-  };
-
-
-  // =====================================================
-  // SORTED DATA
-  // =====================================================
-
-  const sortedData = useMemo(() => {
-
-    return [...analyticsData].sort(
-      (a, b) =>
-        b.score - a.score
-    );
-
+    return {
+      counts,
+      average,
+      priorityCount: counts.High + counts.Critical,
+    };
   }, [analyticsData]);
 
-
-  // =====================================================
-  // TOP 10 TALUKAS
-  // =====================================================
-
-  const topTen = sortedData.slice(
-    0,
-    10
+  const sortedData = useMemo(
+    () => [...analyticsData].sort((a, b) => b.score - a.score),
+    [analyticsData],
   );
-
-
-  // =====================================================
-  // BAR CHART DATA
-  // =====================================================
-
-  const barData =
-    topTen.map(item => ({
-
-      name: item.taluka,
-
-      score: item.score,
-
-      risk: item.risk
-
-    }));
-
-
-  // =====================================================
-  // FILTERED TABLE
-  // =====================================================
 
   const filteredData = useMemo(() => {
-
+    const query = searchTerm.trim().toLowerCase();
     return sortedData.filter(
-      item => {
-
-        const matchesSearch =
-          item.taluka
-            .toLowerCase()
-            .includes(
-              searchTerm
-                .toLowerCase()
-            );
-
-        const matchesRisk =
-          riskFilter === "All" ||
-          item.risk === riskFilter;
-
-        return (
-          matchesSearch &&
-          matchesRisk
-        );
-
-      }
+      (item) =>
+        (riskFilter === "All" || item.risk === riskFilter) &&
+        (!query || `${item.taluka} ${item.village}`.toLowerCase().includes(query)),
     );
-
-  }, [
-    sortedData,
-    searchTerm,
-    riskFilter
-  ]);
-
-
-  // =====================================================
-  // LOADING
-  // =====================================================
+  }, [riskFilter, searchTerm, sortedData]);
 
   if (loading) {
-
-    return (
-
-      <main className="analytics-page">
-
-        <div className="analytics-loading">
-
-          <div className="loading-icon">
-            💧
-          </div>
-
-          <h2>
-            Loading Analytics
-          </h2>
-
-          <p>
-            Preparing Pune water
-            intelligence...
-          </p>
-
-        </div>
-
-      </main>
-
-    );
-
+    return <div className="page-container"><LoadingState title="Loading water analytics" /></div>;
   }
 
+  if (error || !analyticsData.length) {
+    return (
+      <div className="page-container">
+        <EmptyState error={Boolean(error)} title="Analytics unavailable" description={error || "No monitored locations are available for analysis."} />
+      </div>
+    );
+  }
 
-  // =====================================================
-  // PAGE
-  // =====================================================
+  const riskDistribution = Object.entries(summary.counts).map(([name, value]) => ({ name, value }));
+  const topTen = sortedData.slice(0, 10).map((item) => ({ ...item, name: item.taluka }));
+  const priorityPercentage = ((summary.priorityCount / analyticsData.length) * 100).toFixed(1);
 
   return (
+    <div className="page-container analytics-page">
+      <PageHeader
+        eyebrow="AquaLink analytics"
+        title="Water intelligence"
+        description="Location-level analysis of water stress across Pune District."
+      >
+        <div className="data-state-pill"><span className="live-dot" /><div><strong>Dataset active</strong><small>{analyticsData.length} locations</small></div></div>
+      </PageHeader>
 
-    <main className="analytics-page">
-
-
-      {/* =================================================
-          HEADER
-      ================================================= */}
-
-      <section className="analytics-header">
-
-        <div>
-
-          <span className="analytics-eyebrow">
-            AQUALINK ANALYTICS
-          </span>
-
-          <h1>
-            Water Intelligence
-          </h1>
-
-          <p>
-            Taluka-level analysis of water
-            stress across Pune District
-          </p>
-
-        </div>
-
-
-        <div className="analytics-live">
-
-          <span className="live-dot"></span>
-
-          <div>
-
-            <small>
-              DATASET STATUS
-            </small>
-
-            <strong>
-              {totalTalukas} Talukas Active
-            </strong>
-
-          </div>
-
-        </div>
-
-      </section>
-
-
-      {/* =================================================
-          KPI CARDS
-      ================================================= */}
-
-      <section className="analytics-kpis">
-
-
-        <div className="analytics-kpi-card blue">
-
-          <div className="kpi-icon">
-            💧
-          </div>
-
-          <div>
-
-            <span>
-              AVERAGE STRESS
-            </span>
-
-            <strong>
-              {averageStress.toFixed(1)}
-              <small>/100</small>
-            </strong>
-
-            <p>
-              District-wide average
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="analytics-kpi-card green">
-
-          <div className="kpi-icon">
-            ✓
-          </div>
-
-          <div>
-
-            <span>
-              LOW RISK
-            </span>
-
-            <strong>
-              {lowCount}
-            </strong>
-
-            <p>
-              Talukas
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="analytics-kpi-card orange">
-
-          <div className="kpi-icon">
-            ⚠
-          </div>
-
-          <div>
-
-            <span>
-              HIGH RISK
-            </span>
-
-            <strong>
-              {highCount}
-            </strong>
-
-            <p>
-              Talukas
-            </p>
-
-          </div>
-
-        </div>
-
-
-        <div className="analytics-kpi-card red">
-
-          <div className="kpi-icon">
-            !
-          </div>
-
-          <div>
-
-            <span>
-              CRITICAL
-            </span>
-
-            <strong>
-              {criticalCount}
-            </strong>
-
-            <p>
-              Talukas requiring action
-            </p>
-
-          </div>
-
-        </div>
-
-
-      </section>
-
-
-      {/* =================================================
-          CHART ROW
-      ================================================= */}
+      <FadeInUp>
+        <section className="metric-grid">
+          <MetricCard icon={Gauge} label="Average stress" value={summary.average.toFixed(1)} suffix="/100" detail="District-wide average" />
+          <MetricCard icon={CircleCheck} label="Low risk" value={summary.counts.Low} detail="Score below 25" tone="success" />
+          <MetricCard icon={AlertTriangle} label="High risk" value={summary.counts.High} detail="Score 45–64" tone="warning" />
+          <MetricCard icon={ShieldAlert} label="Critical" value={summary.counts.Critical} detail="Requires action" tone="danger" />
+        </section>
+      </FadeInUp>
 
       <section className="analytics-chart-grid">
-
-
-        {/* RISK DISTRIBUTION */}
-
-        <div className="analytics-card">
-
-          <div className="analytics-card-header">
-
-            <div>
-
-              <span>
-                RISK PROFILE
-              </span>
-
-              <h2>
-                Risk Distribution
-              </h2>
-
-              <p>
-                Classification across all
-                {totalTalukas} talukas
-              </p>
-
-            </div>
-
-          </div>
-
-
-          <div className="pie-wrapper">
-
-            <ResponsiveContainer
-              width="100%"
-              height={310}
-            >
-
+        <FadeInUp className="surface-card chart-card">
+          <SectionHeading eyebrow="Risk profile" title="Risk distribution" description={`Classification across ${analyticsData.length} monitored locations.`} />
+          <div className="chart-wrap pie-chart-wrap">
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-
-                <Pie
-                  data={riskDistribution}
-                  cx="50%"
-                  cy="48%"
-                  innerRadius={82}
-                  outerRadius={120}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-
-                  {riskDistribution.map(
-                    (entry) => (
-
-                      <Cell
-                        key={entry.name}
-                        fill={
-                          riskColors[
-                            entry.name
-                          ]
-                        }
-                      />
-
-                    )
-                  )}
-
+                <Pie data={riskDistribution} cx="50%" cy="45%" innerRadius={72} outerRadius={108} paddingAngle={3} dataKey="value">
+                  {riskDistribution.map((entry) => <Cell key={entry.name} fill={RISK_COLORS[entry.name]} />)}
                 </Pie>
-
-
-                <Tooltip />
-
-
-                <Legend
-                  verticalAlign="bottom"
-                  height={36}
-                />
-
+                <Tooltip contentStyle={chartTooltipStyle} itemStyle={{ color: "var(--text)" }} />
+                <Legend verticalAlign="bottom" iconType="circle" />
               </PieChart>
-
             </ResponsiveContainer>
-
-
-            <div className="pie-center">
-
-              <strong>
-                {totalTalukas}
-              </strong>
-
-              <span>
-                TALUKAS
-              </span>
-
-            </div>
-
+            <div className="pie-center"><strong>{analyticsData.length}</strong><span>Locations</span></div>
           </div>
+        </FadeInUp>
 
-        </div>
-
-
-        {/* TOP RISK */}
-
-        <div className="analytics-card">
-
-          <div className="analytics-card-header">
-
-            <div>
-
-              <span>
-                PRIORITY ANALYSIS
-              </span>
-
-              <h2>
-                Highest-Risk Talukas
-              </h2>
-
-              <p>
-                Top 10 locations by
-                water stress score
-              </p>
-
-            </div>
-
-          </div>
-
-
-          <div className="risk-bar-chart">
-
-            <ResponsiveContainer
-              width="100%"
-              height={340}
-            >
-
-              <BarChart
-                data={barData}
-                layout="vertical"
-                margin={{
-                  top: 5,
-                  right: 20,
-                  left: 45,
-                  bottom: 5
-                }}
-              >
-
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  horizontal={false}
-                />
-
-                <XAxis
-                  type="number"
-                  domain={[
-                    0,
-                    "dataMax + 3"
-                  ]}
-                />
-
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={110}
-                  tick={{
-                    fontSize: 11
-                  }}
-                />
-
-                <Tooltip />
-
-                <Bar
-                  dataKey="score"
-                  name="Stress Score"
-                  radius={[
-                    0,
-                    6,
-                    6,
-                    0
-                  ]}
-                >
-
-                  {barData.map(
-                    (item) => (
-
-                      <Cell
-                        key={item.name}
-                        fill={
-                          riskColors[
-                            item.risk
-                          ]
-                        }
-                      />
-
-                    )
-                  )}
-
+        <FadeInUp className="surface-card chart-card" delay={80}>
+          <SectionHeading eyebrow="Priority analysis" title="Highest-risk locations" description="Top 10 records by water stress score." />
+          <div className="chart-wrap bar-chart-wrap">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={topTen} layout="vertical" margin={{ top: 5, right: 20, left: 32, bottom: 5 }}>
+                <CartesianGrid stroke="var(--border-soft)" strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" domain={[0, 100]} stroke="var(--text-muted)" tick={{ fill: "var(--text-secondary)", fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" width={92} stroke="var(--text-muted)" tick={{ fill: "var(--text-secondary)", fontSize: 11 }} />
+                <Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: "var(--border-soft)" }} />
+                <Bar dataKey="score" name="Stress score" radius={[0, 7, 7, 0]}>
+                  {topTen.map((item) => <Cell key={item.id} fill={RISK_COLORS[item.risk]} />)}
                 </Bar>
-
               </BarChart>
-
             </ResponsiveContainer>
-
           </div>
-
-        </div>
-
-
+        </FadeInUp>
       </section>
 
-
-      {/* =================================================
-          DECISION SUPPORT
-      ================================================= */}
-
-      <section className="decision-support">
-
-
-        <div className="decision-content">
-
-          <span className="decision-label">
-            DECISION SUPPORT
-          </span>
-
-          <h2>
-            Intervention Priority
-          </h2>
-
-          <p>
-            {priorityCount} of {totalTalukas}
-            {" "}
-            monitored talukas are classified
-            as High or Critical risk and should
-            receive priority assessment.
-          </p>
-
-
-          <div className="decision-progress">
-
-            <div
-              className="decision-progress-fill"
-              style={{
-                width:
-                  `${priorityPercentage}%`
-              }}
-            />
-
+      <FadeInUp>
+        <section className="decision-banner">
+          <div className="decision-icon" aria-hidden="true"><BarChart3 /></div>
+          <div className="decision-content">
+            <span className="eyebrow">Decision support</span>
+            <h2>Intervention priority</h2>
+            <p>{summary.priorityCount} of {analyticsData.length} monitored locations are High or Critical risk.</p>
+            <div className="progress-track"><span style={{ width: `${priorityPercentage}%` }} /></div>
           </div>
+          <div className="decision-value"><strong>{priorityPercentage}%</strong><span>Priority coverage</span></div>
+        </section>
+      </FadeInUp>
 
-
-          <div className="decision-footer">
-
-            <span>
-              Priority coverage
-            </span>
-
-            <strong>
-              {priorityPercentage}%
-            </strong>
-
-          </div>
-
-        </div>
-
-
-        <div className="decision-stats">
-
-          <div>
-
-            <strong>
-              {highCount}
-            </strong>
-
-            <span>
-              High Risk
-            </span>
-
-          </div>
-
-
-          <div>
-
-            <strong>
-              {criticalCount}
-            </strong>
-
-            <span>
-              Critical
-            </span>
-
-          </div>
-
-
-          <div>
-
-            <strong>
-              {priorityCount}
-            </strong>
-
-            <span>
-              Priority
-            </span>
-
-          </div>
-
-        </div>
-
-      </section>
-
-
-      {/* =================================================
-          FULL TALUKA TABLE
-      ================================================= */}
-
-      <section className="analytics-table-card">
-
-
-        <div className="analytics-table-header">
-
-          <div>
-
-            <span>
-              TALUKA INTELLIGENCE
-            </span>
-
-            <h2>
-              Water Stress by Taluka
-            </h2>
-
-            <p>
-              Complete dataset — all{" "}
-              {totalTalukas} monitored
-              locations
-            </p>
-
-          </div>
-
-
-          <div className="table-controls">
-
-            <div className="table-search">
-
-              <span>
-                🔎
-              </span>
-
-              <input
-                type="text"
-                placeholder="Search taluka..."
-                value={searchTerm}
-                onChange={(e) =>
-                  setSearchTerm(
-                    e.target.value
-                  )
-                }
-              />
-
+      <FadeInUp>
+        <section className="surface-card analytics-table-card">
+          <div className="table-card-header">
+            <SectionHeading eyebrow="Location intelligence" title="Water stress records" description={`Complete dataset — ${analyticsData.length} monitored locations.`} />
+            <div className="table-controls">
+              <label className="field-group field-grow">
+                <span>Search locations</span>
+                <div className="input-with-icon"><Search size={17} aria-hidden="true" /><input type="search" placeholder="Search taluka or village" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} /></div>
+              </label>
+              <label className="field-group">
+                <span>Risk level</span>
+                <select value={riskFilter} onChange={(event) => setRiskFilter(event.target.value)}>
+                  <option value="All">All risks</option>
+                  <option value="Low">Low</option>
+                  <option value="Moderate">Moderate</option>
+                  <option value="High">High</option>
+                  <option value="Critical">Critical</option>
+                </select>
+              </label>
             </div>
-
-
-            <select
-              value={riskFilter}
-              onChange={(e) =>
-                setRiskFilter(
-                  e.target.value
-                )
-              }
-            >
-
-              <option value="All">
-                All Risks
-              </option>
-
-              <option value="Low">
-                Low
-              </option>
-
-              <option value="Moderate">
-                Moderate
-              </option>
-
-              <option value="High">
-                High
-              </option>
-
-              <option value="Critical">
-                Critical
-              </option>
-
-            </select>
-
           </div>
-
-        </div>
-
-
-        <div className="table-result">
-
-          Showing{" "}
-          <strong>
-            {filteredData.length}
-          </strong>{" "}
-          of{" "}
-          <strong>
-            {totalTalukas}
-          </strong>{" "}
-          talukas
-
-        </div>
-
-
-        <div className="analytics-table-scroll">
-
-          <table className="analytics-table">
-
-            <thead>
-
-              <tr>
-
-                <th>
-                  #
-                </th>
-
-                <th>
-                  TALUKA
-                </th>
-
-                <th>
-                  STRESS SCORE
-                </th>
-
-                <th>
-                  RISK LEVEL
-                </th>
-
-                <th>
-                  STRESS INDEX
-                </th>
-
-                <th>
-                  PRIORITY
-                </th>
-
-              </tr>
-
-            </thead>
-
-
-            <tbody>
-
-              {filteredData.map(
-                (item, index) => {
-
-                  const percentage =
-                    Math.min(
-                      (
-                        item.score /
-                        40
-                      ) *
-                      100,
-                      100
-                    );
-
-                  return (
-
-                    <tr
-                      key={item.id}
-                    >
-
-                      <td>
-                        {index + 1}
-                      </td>
-
-
-                      <td>
-
-                        <div className="taluka-name">
-
-                          <strong>
-                            {item.taluka}
-                          </strong>
-
-                          <span>
-                            Pune District
-                          </span>
-
-                        </div>
-
-                      </td>
-
-
-                      <td>
-
-                        <strong
-                          className="score-value"
-                          style={{
-                            color:
-                              riskColors[
-                                item.risk
-                              ]
-                          }}
-                        >
-                          {item.score}
-                        </strong>
-
-                        <span>
-                          /100
-                        </span>
-
-                      </td>
-
-
-                      <td>
-
-                        <span
-                          className="risk-badge"
-                          style={{
-                            color:
-                              riskColors[
-                                item.risk
-                              ],
-                            background:
-                              `${riskColors[item.risk]}18`
-                          }}
-                        >
-
-                          <i
-                            style={{
-                              background:
-                                riskColors[
-                                  item.risk
-                                ]
-                            }}
-                          />
-
-                          {item.risk}
-
-                        </span>
-
-                      </td>
-
-
-                      <td>
-
-                        <div className="stress-bar">
-
-                          <div>
-
-                            <span
-                              style={{
-                                width:
-                                  `${percentage}%`,
-                                background:
-                                  riskColors[
-                                    item.risk
-                                  ]
-                              }}
-                            />
-
-                          </div>
-
-                        </div>
-
-                      </td>
-
-
-                      <td>
-
-                        <span
-                          className={
-                            item.risk ===
-                            "Critical"
-                              ? "priority critical"
-                              : item.risk ===
-                                "High"
-                                ? "priority high"
-                                : item.risk ===
-                                  "Moderate"
-                                  ? "priority monitor"
-                                  : "priority stable"
-                          }
-                        >
-
-                          {item.risk ===
-                          "Critical"
-                            ? "Immediate"
-                            : item.risk ===
-                              "High"
-                              ? "Priority"
-                              : item.risk ===
-                                "Moderate"
-                                ? "Monitor"
-                                : "Stable"}
-
-                        </span>
-
-                      </td>
-
-                    </tr>
-
-                  );
-
-                }
-              )}
-
-            </tbody>
-
-          </table>
-
-
-          {filteredData.length ===
-            0 && (
-
-            <div className="no-results">
-
-              <span>
-                🔎
-              </span>
-
-              <h3>
-                No talukas found
-              </h3>
-
-              <p>
-                Try changing your search
-                or risk filter.
-              </p>
-
-            </div>
-
-          )}
-
-        </div>
-
-      </section>
-
-
-    </main>
-
+          <p className="table-result-count">Showing <strong>{filteredData.length}</strong> of <strong>{analyticsData.length}</strong> locations</p>
+          <div className="table-scroll">
+            <table className="data-table analytics-table">
+              <thead><tr><th scope="col">#</th><th scope="col">Location</th><th scope="col">Stress score</th><th scope="col">Risk level</th><th scope="col">Stress index</th><th scope="col">Priority</th></tr></thead>
+              <tbody>
+                {filteredData.map((item, index) => (
+                  <tr key={item.id}>
+                    <td>{index + 1}</td>
+                    <td><div className="table-primary"><strong>{item.taluka}</strong><span>{item.village}</span></div></td>
+                    <td><strong style={{ color: RISK_COLORS[item.risk] }}>{item.score}</strong><span className="table-unit">/100</span></td>
+                    <td><StatusBadge status={item.risk} /></td>
+                    <td><div className="stress-track"><span style={{ width: `${Math.max(item.score, 2)}%`, background: RISK_COLORS[item.risk] }} /></div></td>
+                    <td><span className={`priority-label ${item.risk.toLowerCase()}`}>{item.risk === "Critical" ? "Immediate" : item.risk === "High" ? "Priority" : item.risk === "Moderate" ? "Monitor" : "Stable"}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!filteredData.length ? <EmptyState title="No locations found" description="Try changing your search or risk filter." /> : null}
+          </div>
+        </section>
+      </FadeInUp>
+    </div>
   );
-
 }
-
 
 export default Analytics;

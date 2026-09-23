@@ -1,680 +1,153 @@
 import { useEffect, useMemo, useState } from "react";
-
+import {
+  AlertTriangle,
+  BarChart3,
+  Filter,
+  MapPinned,
+  Search,
+  ShieldCheck,
+  Target,
+} from "lucide-react";
+import FadeInUp from "../components/FadeInUp";
 import RiskMap from "../components/RiskMap";
-
+import {
+  EmptyState,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  SectionHeading,
+} from "../components/ui";
 import { loadPuneData } from "../utils/loadAquaLinkData";
-
+import { getRiskLevel, getTalukaName, getWaterScore } from "../utils/waterMetrics";
 
 function MapPage() {
-
-  // =========================================
-  // STATE
-  // =========================================
-
   const [data, setData] = useState([]);
-
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-
-  const [selectedRisk, setSelectedRisk] =
-    useState("All");
-
-
-  // =========================================
-  // LOAD DATA
-  // =========================================
+  const [selectedRisk, setSelectedRisk] = useState("All");
 
   useEffect(() => {
-
+    let active = true;
     loadPuneData()
       .then((result) => {
-
-        console.log(
-          "Map Page Data:",
-          result
-        );
-
-        setData(result);
-
+        if (active) setData(Array.isArray(result) ? result : []);
       })
-      .catch((error) => {
-
-        console.error(
-          "Error loading map data:",
-          error
-        );
-
+      .catch((loadError) => {
+        console.error("Error loading map data:", loadError);
+        if (active) setError("Spatial water stress data could not be loaded.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-
+    return () => {
+      active = false;
+    };
   }, []);
 
-
-  // =========================================
-  // RISK LEVEL
-  // =========================================
-
-  const getRiskLevel = (score) => {
-    const value = Number(score);
-
-    if (value >= 65) return "Critical";
-    if (value >= 45) return "High";
-    if (value >= 25) return "Moderate";
-    return "Low";
-  };
-
-
-
-  // =========================================
-  // FILTER DATA
-  // =========================================
-
   const filteredData = useMemo(() => {
-
-    const search =
-      searchTerm.trim().toLowerCase();
-
-
+    const query = searchTerm.trim().toLowerCase();
     return data.filter((item) => {
-
-      const risk = getRiskLevel(
-        item.Water_Stress_Score
-      );
-
-
-      const name = String(
-        item.Taluka ||
-        item.Village_Ward ||
-        ""
-      ).toLowerCase();
-
-
-      const matchesRisk =
-        selectedRisk === "All" ||
-        risk === selectedRisk;
-
-
-      const matchesSearch =
-        search === "" ||
-        name.includes(search);
-
-
+      const risk = getRiskLevel(getWaterScore(item));
+      const searchableName = `${getTalukaName(item)} ${item.Village_Ward || ""}`.toLowerCase();
       return (
-        matchesRisk &&
-        matchesSearch
+        (selectedRisk === "All" || risk === selectedRisk) &&
+        (!query || searchableName.includes(query))
       );
-
     });
+  }, [data, searchTerm, selectedRisk]);
 
-  }, [
-    data,
-    selectedRisk,
-    searchTerm
-  ]);
-
-
-  // =========================================
-  // DISTRICT AVERAGE
-  // =========================================
-
-  const averageStress =
-    data.length > 0
-
-      ? data.reduce(
-          (sum, item) =>
-            sum +
-            Number(
-              item.Water_Stress_Score || 0
-            ),
-          0
-        ) / data.length
-
+  const summary = useMemo(() => {
+    const counts = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    data.forEach((item) => {
+      counts[getRiskLevel(getWaterScore(item))] += 1;
+    });
+    const average = data.length
+      ? data.reduce((sum, item) => sum + getWaterScore(item), 0) / data.length
       : 0;
+    return { counts, average };
+  }, [data]);
 
-
-  // =========================================
-  // RISK COUNTS
-  // =========================================
-
-  const lowRisk = data.filter(
-    (item) => Number(item.Water_Stress_Score) < 25
-  ).length;
-
-  const moderateRisk = data.filter((item) => {
-    const score = Number(item.Water_Stress_Score);
-    return score >= 25 && score < 45;
-  }).length;
-
-  const highRisk = data.filter((item) => {
-    const score = Number(item.Water_Stress_Score);
-    return score >= 45 && score < 65;
-  }).length;
-
-  const criticalRisk = data.filter(
-    (item) => Number(item.Water_Stress_Score) >= 65
-  ).length;
-
-
-
-  // =========================================
-  // LOADING STATE
-  // =========================================
-
-  if (!data.length) {
-
-    return (
-
-      <div className="map-page">
-
-        <div className="map-page-header">
-
-          <div>
-
-            <span className="section-label">
-              GIS MONITORING
-            </span>
-
-            <h1>
-              Pune Water Risk Map
-            </h1>
-
-            <p>
-              Loading spatial water stress data...
-            </p>
-
-          </div>
-
-          <div className="map-status">
-
-            <span className="status-dot"></span>
-
-            Loading Dataset
-
-          </div>
-
-        </div>
-
-      </div>
-
-    );
-
+  if (loading) {
+    return <div className="page-container"><LoadingState title="Loading Pune risk map" /></div>;
   }
 
-
-  // =========================================
-  // PAGE
-  // =========================================
+  if (error || !data.length) {
+    return (
+      <div className="page-container">
+        <EmptyState error={Boolean(error)} title="Map data unavailable" description={error || "No monitored locations are available."} />
+      </div>
+    );
+  }
 
   return (
-
-    <div className="map-page">
-
-
-      {/* =====================================
-          HEADER
-      ===================================== */}
-
-      <div className="map-page-header">
-
-        <div>
-
-          <span className="section-label">
-            GIS MONITORING
-          </span>
-
-          <h1>
-            Pune Water Risk Map
-          </h1>
-
-          <p>
-            Spatial intelligence for identifying
-            water-stressed locations
-          </p>
-
-        </div>
-
-
-        <div className="map-status">
-
-          <span className="status-dot"></span>
-
-          Dataset Active
-
-        </div>
-
-      </div>
-
-
-      {/* =====================================
-          RISK SUMMARY
-      ===================================== */}
-
-      <div className="map-risk-summary">
-
-
-        {/* TOTAL */}
-
-        <div className="map-risk-total">
-
-          <span>
-            MONITORED LOCATIONS
-          </span>
-
-          <strong>
-            {data.length}
-          </strong>
-
-          <small>
-            Pune District
-          </small>
-
-        </div>
-
-
-        {/* LOW */}
-
-        <div className="map-risk-stat low">
-
-          <span className="map-risk-dot"></span>
-
-          <div>
-
-            <strong>
-              {lowRisk}
-            </strong>
-
-            <small>
-              Low
-            </small>
-
-          </div>
-
-        </div>
-
-
-        {/* MODERATE */}
-
-        <div className="map-risk-stat moderate">
-
-          <span className="map-risk-dot"></span>
-
-          <div>
-
-            <strong>
-              {moderateRisk}
-            </strong>
-
-            <small>
-              Moderate
-            </small>
-
-          </div>
-
-        </div>
-
-
-        {/* HIGH */}
-
-        <div className="map-risk-stat high">
-
-          <span className="map-risk-dot"></span>
-
-          <div>
-
-            <strong>
-              {highRisk}
-            </strong>
-
-            <small>
-              High
-            </small>
-
-          </div>
-
-        </div>
-
-
-        {/* CRITICAL */}
-
-        <div className="map-risk-stat critical">
-
-          <span className="map-risk-dot"></span>
-
-          <div>
-
-            <strong>
-              {criticalRisk}
-            </strong>
-
-            <small>
-              Critical
-            </small>
-
-          </div>
-
-        </div>
-
-      </div>
-
-
-      {/* =====================================
-          MAP TOOLBAR
-      ===================================== */}
-
-      <div className="map-toolbar">
-
-
-        {/* SEARCH */}
-
-        <div className="map-search">
-
-          <span>
-            🔎
-          </span>
-
-          <input
-            type="text"
-            placeholder="Search taluka or location..."
-            value={searchTerm}
-            onChange={(e) =>
-              setSearchTerm(
-                e.target.value
-              )
-            }
+    <div className="page-container map-page">
+      <PageHeader
+        eyebrow="GIS monitoring"
+        title="Pune water risk map"
+        description="Spatial intelligence for locating water stress and prioritising field intervention."
+      >
+        <div className="data-state-pill"><span className="live-dot" /><div><strong>Spatial layer active</strong><small>{data.length} mapped records</small></div></div>
+      </PageHeader>
+
+      <FadeInUp>
+        <section className="metric-grid map-metric-grid">
+          <MetricCard icon={MapPinned} label="Monitored locations" value={data.length} detail="Pune District" />
+          <MetricCard icon={ShieldCheck} label="Low risk" value={summary.counts.Low} detail="Score below 25" tone="success" />
+          <MetricCard icon={AlertTriangle} label="High + critical" value={summary.counts.High + summary.counts.Critical} detail="Priority locations" tone="danger" />
+          <MetricCard icon={BarChart3} label="Average stress" value={summary.average.toFixed(1)} suffix="/100" detail="District average" tone="blue" />
+        </section>
+      </FadeInUp>
+
+      <FadeInUp>
+        <section className="surface-card map-section">
+          <SectionHeading
+            eyebrow="Spatial view"
+            title="Water stress distribution"
+            description="Search, filter, and select any marker for location-level detail."
+            meta={`${filteredData.length} of ${data.length} shown`}
           />
 
-        </div>
-
-
-        {/* FILTER */}
-
-        <div className="map-filter-group">
-
-          <span>
-            FILTER
-          </span>
-
-
-          <select
-            value={selectedRisk}
-            onChange={(e) =>
-              setSelectedRisk(
-                e.target.value
-              )
-            }
-          >
-
-            <option value="All">
-              All Risk Levels
-            </option>
-
-            <option value="Low">
-              Low
-            </option>
-
-            <option value="Moderate">
-              Moderate
-            </option>
-
-            <option value="High">
-              High
-            </option>
-
-            <option value="Critical">
-              Critical
-            </option>
-
-          </select>
-
-        </div>
-
-
-      </div>
-
-
-      {/* =====================================
-          MAP
-      ===================================== */}
-
-      <div className="map-main-card">
-
-
-        {/* MAP HEADER */}
-
-        <div className="map-main-header">
-
-          <div>
-
-            <span className="section-label">
-              SPATIAL VIEW
-            </span>
-
-            <h2>
-              Water Stress Distribution
-            </h2>
-
+          <div className="filter-bar">
+            <label className="field-group field-grow">
+              <span>Search location</span>
+              <div className="input-with-icon">
+                <Search size={17} aria-hidden="true" />
+                <input
+                  type="search"
+                  placeholder="Search taluka or village"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+              </div>
+            </label>
+            <label className="field-group">
+              <span>Risk level</span>
+              <div className="input-with-icon">
+                <Filter size={17} aria-hidden="true" />
+                <select value={selectedRisk} onChange={(event) => setSelectedRisk(event.target.value)}>
+                  <option value="All">All risk levels</option>
+                  <option value="Low">Low</option>
+                  <option value="Moderate">Moderate</option>
+                  <option value="High">High</option>
+                  <option value="Critical">Critical</option>
+                </select>
+              </div>
+            </label>
           </div>
 
-
-          <div className="map-result-count">
-
-            Showing{" "}
-
-            <strong>
-              {filteredData.length}
-            </strong>{" "}
-
-            of{" "}
-
-            <strong>
-              {data.length}
-            </strong>{" "}
-
-            locations
-
-          </div>
-
-        </div>
-
-
-        {/* MAP */}
-
-        <div className="map-full">
-
-          <RiskMap
-            filteredData={filteredData}
-          />
-
-        </div>
-
-
-      </div>
-
-
-      {/* =====================================
-          LEGEND
-      ===================================== */}
-
-      <div className="map-legend-card">
-
-
-        <div>
-
-          <strong>
-            Risk Classification
-          </strong>
-
-          <span>
-            Water stress score
-          </span>
-
-        </div>
-
-
-        <div className="map-legend-items">
-
-
-          <div>
-
-            <span className="legend-dot low"></span>
-
-            <span>
-              Low
-            </span>
-
-            <small>
-              0–24
-            </small>
-
-          </div>
-
-
-          <div>
-
-            <span className="legend-dot moderate"></span>
-
-            <span>
-              Moderate
-            </span>
-
-            <small>
-              25–44
-            </small>
-
-          </div>
-
-
-          <div>
-
-            <span className="legend-dot high"></span>
-
-            <span>
-              High
-            </span>
-
-            <small>
-              45–64
-            </small>
-
-          </div>
-
-
-          <div>
-
-            <span className="legend-dot critical"></span>
-
-            <span>
-              Critical
-            </span>
-
-            <small>
-              65+
-            </small>
-
-          </div>
-
-
-
-        </div>
-
-      </div>
-
-
-      {/* =====================================
-          INFORMATION CARDS
-      ===================================== */}
-
-      <div className="map-bottom-grid">
-
-
-        {/* EXPLORE */}
-
-        <div className="map-info-card">
-
-          <span className="map-info-icon">
-            📍
-          </span>
-
-          <div>
-
-            <h3>
-              Explore locations
-            </h3>
-
-            <p>
-              Click any marker to view the
-              location's water stress score,
-              risk classification and
-              geographic information.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        {/* PRIORITIZE */}
-
-        <div className="map-info-card">
-
-          <span className="map-info-icon">
-            🎯
-          </span>
-
-          <div>
-
-            <h3>
-              Prioritize intervention
-            </h3>
-
-            <p>
-              Red and orange markers indicate
-              locations where water stress
-              requires greater attention.
-            </p>
-
-          </div>
-
-        </div>
-
-
-        {/* AVERAGE */}
-
-        <div className="map-info-card">
-
-          <span className="map-info-icon">
-            📊
-          </span>
-
-          <div>
-
-            <h3>
-              Average district stress
-            </h3>
-
-            <p>
-
-              Current Pune average:
-
-              <strong>
-                {" "}
-                {averageStress.toFixed(1)}
-                /100
-              </strong>
-
-            </p>
-
-          </div>
-
-        </div>
-
-
-      </div>
-
-
+          <RiskMap data={filteredData} />
+        </section>
+      </FadeInUp>
+
+      <FadeInUp>
+        <section className="map-guidance-grid" aria-label="Map guidance">
+          <article className="guidance-card"><MapPinned aria-hidden="true" /><div><h2>Explore locations</h2><p>Select a marker to review its score, risk class, and geographic position.</p></div></article>
+          <article className="guidance-card"><Target aria-hidden="true" /><div><h2>Prioritise intervention</h2><p>Orange and red markers identify locations needing greater attention.</p></div></article>
+        </section>
+      </FadeInUp>
     </div>
-
   );
-
 }
-
 
 export default MapPage;

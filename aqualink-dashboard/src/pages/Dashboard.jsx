@@ -1,345 +1,118 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowUpRight,
+  MapPin,
+  Radar,
+  ShieldAlert,
+  Waves,
+} from "lucide-react";
+import FadeInUp from "../components/FadeInUp";
+import {
+  EmptyState,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  SectionHeading,
+  StatusBadge,
+} from "../components/ui";
 import { loadPuneData } from "../utils/loadAquaLinkData";
-import { talukaNames } from "../utils/talukaNames";
+import { getRiskLevel, getTalukaName, getWaterScore } from "../utils/waterMetrics";
 
-/* =========================================================
-   HELPERS
-========================================================= */
+const riskCategories = ["Low", "Moderate", "High", "Critical"];
 
-const getValue = (obj, keys, fallback = "") => {
-  for (const key of keys) {
-    if (
-      obj &&
-      obj[key] !== undefined &&
-      obj[key] !== null &&
-      obj[key] !== ""
-    ) {
-      return obj[key];
-    }
-  }
-
-  return fallback;
-};
-
-const getScore = (item) => {
-  const value = getValue(item, [
-    "Water Stress Score",
-    "Water_Stress_Score",
-    "WaterStressScore",
-    "Stress Score",
-    "Stress_Score",
-    "stress_score",
-    "Score",
-    "score",
-    "WaterStress",
-    "water_stress",
-  ]);
-
-  const score = Number(value);
-  return Number.isFinite(score) ? score : 0;
-};
-
-const getTaluka = (item) => {
-  const value = getValue(item, [
-    "Taluka",
-    "taluka",
-    "TALUKA",
-    "Taluka_Name",
-    "taluka_name",
-    "Taluka Name",
-  ]);
-
-  return String(value || "Unknown Taluka").trim();
-};
-
-const getDisplayTalukaName = (taluka) => {
-  if (!taluka) return "Unknown Taluka";
-
-  return (
-    talukaNames?.[taluka] ||
-    talukaNames?.[String(taluka)] ||
-    taluka
+function RiskDistribution({ distribution, total }) {
+  const percentages = Object.fromEntries(
+    riskCategories.map((risk) => [
+      risk,
+      total ? (distribution[risk] / total) * 100 : 0,
+    ]),
   );
-};
 
-/* =========================================================
-   RISK CLASSIFICATION
-========================================================= */
-
-const getRiskLevel = (score) => {
-  if (score >= 65) return "Critical";
-  if (score >= 45) return "High";
-  if (score >= 25) return "Moderate";
-  return "Low";
-};
-
-const getRiskClass = (risk) => {
-  switch (risk) {
-    case "Critical":
-      return "risk-critical";
-    case "High":
-      return "risk-high";
-    case "Moderate":
-      return "risk-moderate";
-    default:
-      return "risk-low";
-  }
-};
-
-/* =========================================================
-   RISK DISTRIBUTION
-   IMPORTANT:
-   This uses ALL 250 individual records.
-========================================================= */
-
-const RiskDistribution = ({ distribution, total }) => {
-  const low = distribution.Low;
-  const moderate = distribution.Moderate;
-  const high = distribution.High;
-  const critical = distribution.Critical;
-
-  const lowPct = total ? (low / total) * 100 : 0;
-  const moderatePct = total ? (moderate / total) * 100 : 0;
-  const highPct = total ? (high / total) * 100 : 0;
-
-  const gradient = `
-    conic-gradient(
-      #16a34a 0 ${lowPct}%,
-      #f0b400 ${lowPct}% ${lowPct + moderatePct}%,
-      #f97316 ${lowPct + moderatePct}% ${lowPct + moderatePct + highPct}%,
-      #dc2626 ${lowPct + moderatePct + highPct}% 100%
-    )
-  `;
-
-  const categories = [
-    {
-      name: "Low",
-      value: low,
-      range: "Score 0–24",
-      className: "distribution-low",
-    },
-    {
-      name: "Moderate",
-      value: moderate,
-      range: "Score 25–44",
-      className: "distribution-moderate",
-    },
-    {
-      name: "High",
-      value: high,
-      range: "Score 45–64",
-      className: "distribution-high",
-    },
-    {
-      name: "Critical",
-      value: critical,
-      range: "Score 65+",
-      className: "distribution-critical",
-    },
-  ];
-
+  const moderateEnd = percentages.Low + percentages.Moderate;
+  const highEnd = moderateEnd + percentages.High;
+  const gradient = `conic-gradient(
+    var(--risk-low) 0 ${percentages.Low}%,
+    var(--risk-moderate) ${percentages.Low}% ${moderateEnd}%,
+    var(--risk-high) ${moderateEnd}% ${highEnd}%,
+    var(--risk-critical) ${highEnd}% 100%
+  )`;
 
   return (
-    <section className="dashboard-section">
-      <div className="section-heading">
-        <div>
-          <span className="section-eyebrow">RISK DISTRIBUTION</span>
-          <h2>Current Location Risk</h2>
-          <p>Classification of all {total} monitored locations</p>
-        </div>
-
-        <span className="section-meta">ALL MONITORED RECORDS</span>
-      </div>
-
-      <div className="risk-distribution-panel">
-        <div className="distribution-header">
-          <div>
-            <strong>{total} locations</strong>
-            <span>Current distribution</span>
-          </div>
-
-          <span>100%</span>
-        </div>
-
-        <div className="distribution-main">
-          {/* DONUT */}
-          <div className="donut-wrapper">
-            <div
-              className="risk-donut"
-              style={{ background: gradient }}
-            >
-              <div className="risk-donut-center">
-                <strong>{total}</strong>
-                <span>Locations</span>
-              </div>
+    <section className="surface-card dashboard-section">
+      <SectionHeading
+        eyebrow="Risk distribution"
+        title="Current location risk"
+        description={`Classification across all ${total} monitored locations.`}
+        meta="Latest dataset"
+      />
+      <div className="distribution-layout">
+        <div className="donut-wrap">
+          <div className="risk-donut" style={{ background: gradient }}>
+            <div className="risk-donut-center">
+              <strong>{total}</strong>
+              <span>Locations</span>
             </div>
           </div>
-
-          {/* LEGEND CARDS */}
-          <div className="distribution-grid">
-            {categories.map((item) => (
-              <div
-                key={item.name}
-                className={`distribution-card ${item.className}`}
-              >
-                <div className="distribution-title">
-                  <span className="distribution-dot" />
-                  <span>{item.name}</span>
-                </div>
-
-                <strong>{item.value}</strong>
-                <span>{item.range}</span>
-
-                <div className="distribution-percent">
-                  {total
-                    ? ((item.value / total) * 100).toFixed(1)
-                    : "0.0"}
-                  %
-                </div>
+        </div>
+        <div className="distribution-grid">
+          {riskCategories.map((risk) => (
+            <article className={`distribution-card risk-${risk.toLowerCase()}`} key={risk}>
+              <div className="distribution-card-heading">
+                <span className="risk-dot" />
+                <span>{risk}</span>
               </div>
-            ))}
-          </div>
+              <strong>{distribution[risk]}</strong>
+              <p>{percentages[risk].toFixed(1)}% of locations</p>
+            </article>
+          ))}
         </div>
-
-        {/* FULL WIDTH BAR */}
-        <div className="distribution-bar">
-          <div
-            className="bar-low"
-            style={{ width: `${lowPct}%` }}
+      </div>
+      <div className="distribution-track" aria-label="Risk distribution proportions">
+        {riskCategories.map((risk) => (
+          <span
+            key={risk}
+            className={`risk-${risk.toLowerCase()}`}
+            style={{ width: `${percentages[risk]}%` }}
           />
-          <div
-            className="bar-moderate"
-            style={{ width: `${moderatePct}%` }}
-          />
-          <div
-            className="bar-high"
-            style={{ width: `${highPct}%` }}
-          />
-          <div
-            className="bar-critical"
-            style={{
-              width: `${100 - lowPct - moderatePct - highPct}%`,
-            }}
-          />
-        </div>
+        ))}
       </div>
     </section>
   );
-};
+}
 
-/* =========================================================
-   KPI CARD
-========================================================= */
-
-const KpiCard = ({
-  icon,
-  label,
-  value,
-  subtitle,
-  variant = "",
-}) => {
-  return (
-    <div className={`kpi-card ${variant}`}>
-      <div className="kpi-icon">{icon}</div>
-
-      <div className="kpi-content">
-        <span className="kpi-label">{label}</span>
-        <strong>{value}</strong>
-        <span className="kpi-subtitle">{subtitle}</span>
-      </div>
-    </div>
-  );
-};
-
-/* =========================================================
-   DECISION CARD
-========================================================= */
-
-const DecisionCard = ({
-  icon,
-  priority,
-  title,
-  value,
-  description,
-  action,
-  variant,
-}) => {
-  return (
-    <div className={`decision-card ${variant}`}>
-      <div className="decision-icon">{icon}</div>
-
-      <span className="decision-priority">
-        {priority}
-      </span>
-
-      <h3>{title}</h3>
-
-      <strong className="decision-value">{value}</strong>
-
-      <p>{description}</p>
-
-      <span className="decision-action">{action}</span>
-    </div>
-  );
-};
-
-/* =========================================================
-   MAIN DASHBOARD
-========================================================= */
-
-export default function Dashboard() {
+function Dashboard() {
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  /* -------------------------------------------------------
-     LOAD DATA
-  ------------------------------------------------------- */
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    let mounted = true;
+    let active = true;
 
-    const fetchData = async () => {
-      try {
-        const result = await loadPuneData();
-
-        let data = [];
-
-        if (Array.isArray(result)) {
-          data = result;
-        } else if (Array.isArray(result?.data)) {
-          data = result.data;
-        } else if (Array.isArray(result?.records)) {
-          data = result.records;
-        }
-
-        if (mounted) {
-          setRawData(data);
-        }
-      } catch (error) {
-        console.error("Failed to load Pune data:", error);
-
-        if (mounted) {
-          setRawData([]);
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchData();
+    loadPuneData()
+      .then((result) => {
+        if (!active) return;
+        const records = Array.isArray(result)
+          ? result
+          : result?.data ?? result?.records ?? [];
+        setRawData(records);
+      })
+      .catch((loadError) => {
+        console.error("Failed to load Pune data:", loadError);
+        if (active) setError("The AquaLink dataset could not be loaded.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     return () => {
-      mounted = false;
+      active = false;
     };
   }, []);
 
-  /* =======================================================
-     CALCULATIONS
-  ======================================================= */
-
   const dashboardData = useMemo(() => {
+    const distribution = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
     if (!rawData.length) {
       return {
         totalLocations: 0,
@@ -348,151 +121,80 @@ export default function Dashboard() {
         districtRisk: "Low",
         highRiskTalukas: 0,
         criticalTalukas: 0,
-        distribution: {
-          Low: 0,
-          Moderate: 0,
-          High: 0,
-          Critical: 0,
-        },
+        distribution,
         talukas: [],
         priorityTalukas: [],
       };
     }
 
-    /* -----------------------------------------------------
-       ALL 250 RECORDS
-    ----------------------------------------------------- */
-
-    const totalLocations = rawData.length;
-
-    /* -----------------------------------------------------
-       DISTRICT AVERAGE
-    ----------------------------------------------------- */
-
-    const scores = rawData.map(getScore);
-
-    const districtScore =
-      scores.reduce((sum, score) => sum + score, 0) /
-      Math.max(scores.length, 1);
-
-    const districtRisk = getRiskLevel(districtScore);
-
-    /* -----------------------------------------------------
-       RISK DISTRIBUTION
-       ALL INDIVIDUAL RECORDS
-    ----------------------------------------------------- */
-
-    const distribution = {
-      Low: 0,
-      Moderate: 0,
-      High: 0,
-      Critical: 0,
-    };
-
     rawData.forEach((item) => {
-      const risk = getRiskLevel(getScore(item));
-      distribution[risk]++;
+      distribution[getRiskLevel(getWaterScore(item))] += 1;
     });
 
-    /* -----------------------------------------------------
-       GROUP ALL RECORDS BY TALUKA
-    ----------------------------------------------------- */
-
-    const talukaGroups = {};
-
-    rawData.forEach((item) => {
-      const taluka = getTaluka(item);
-
-      if (!talukaGroups[taluka]) {
-        talukaGroups[taluka] = [];
-      }
-
-      talukaGroups[taluka].push(item);
-    });
-
-    /* -----------------------------------------------------
-       TALUKA AVERAGES
-    ----------------------------------------------------- */
+    const talukaGroups = rawData.reduce((groups, item) => {
+      const rawName = String(item?.Taluka ?? item?.taluka ?? "Unknown Taluka");
+      groups[rawName] ??= [];
+      groups[rawName].push(item);
+      return groups;
+    }, {});
 
     const talukas = Object.entries(talukaGroups)
-      .map(([taluka, records]) => {
-        const talukaScores = records.map(getScore);
-
+      .map(([rawName, records]) => {
+        const scores = records.map(getWaterScore);
         const average =
-          talukaScores.reduce(
-            (sum, score) => sum + score,
-            0
-          ) / Math.max(talukaScores.length, 1);
-
-        const risk = getRiskLevel(average);
-
+          scores.reduce((sum, score) => sum + score, 0) /
+          Math.max(scores.length, 1);
+        const peakScore = Math.max(...scores);
         return {
-          rawName: taluka,
-          name: getDisplayTalukaName(taluka),
+          rawName,
+          name: getTalukaName(rawName),
           records: records.length,
           score: Number(average.toFixed(1)),
-          risk,
+          averageRisk: getRiskLevel(average),
+          peakScore,
+          // A taluka needs attention when any monitored location in it does.
+          // Using the taluka average here hid isolated high/critical hotspots.
+          risk: getRiskLevel(peakScore),
         };
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.peakScore - a.peakScore || b.score - a.score);
 
-    /* -----------------------------------------------------
-       TALUKA KPI COUNTS
-       Based on TALUKA AVERAGES, not individual records
-    ----------------------------------------------------- */
-
-    const highRiskTalukas = talukas.filter(
-      (item) => item.score >= 45 && item.score < 65
-    ).length;
-
-    const criticalTalukas = talukas.filter(
-      (item) => item.score >= 65
-    ).length;
-
+    const districtScore =
+      rawData.reduce((sum, item) => sum + getWaterScore(item), 0) / rawData.length;
 
     return {
-      totalLocations,
+      totalLocations: rawData.length,
       totalTalukas: talukas.length,
       districtScore: Number(districtScore.toFixed(1)),
-      districtRisk,
-      highRiskTalukas,
-      criticalTalukas,
+      districtRisk: getRiskLevel(districtScore),
+      highRiskTalukas: talukas.filter((item) => item.risk === "High").length,
+      criticalTalukas: talukas.filter((item) => item.risk === "Critical").length,
       distribution,
       talukas,
       priorityTalukas: talukas.slice(0, 5),
     };
   }, [rawData]);
 
-  /* =======================================================
-     LOADING
-  ======================================================= */
-
   if (loading) {
     return (
-      <main className="dashboard">
-        <div className="dashboard-loading">
-          <div className="loading-spinner" />
-          <p>Loading Pune water intelligence...</p>
-        </div>
-      </main>
+      <div className="page-container">
+        <LoadingState
+          title="Loading Pune water intelligence"
+          description="Analysing monitored locations and taluka-level risk."
+        />
+      </div>
     );
   }
 
-  /* =======================================================
-     EMPTY DATA
-  ======================================================= */
-
-  if (!rawData.length) {
+  if (error || !rawData.length) {
     return (
-      <main className="dashboard">
-        <div className="empty-dashboard">
-          <div className="empty-icon">💧</div>
-          <h2>No dataset available</h2>
-          <p>
-            The Pune water stress dataset could not be loaded.
-          </p>
-        </div>
-      </main>
+      <div className="page-container">
+        <EmptyState
+          error={Boolean(error)}
+          title="No dataset available"
+          description={error || "The Pune water stress dataset contains no records."}
+        />
+      </div>
     );
   }
 
@@ -507,338 +209,139 @@ export default function Dashboard() {
     priorityTalukas,
     talukas,
   } = dashboardData;
-
-  const locationsRequiringAttention =
-    distribution.High + distribution.Critical;
-
-  /* =======================================================
-     RENDER
-  ======================================================= */
+  const locationsRequiringAttention = distribution.High + distribution.Critical;
 
   return (
-    <main className="dashboard">
-
-      {/* ===================================================
-          HEADER
-      =================================================== */}
-
-      <header className="dashboard-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-          <img src="/logo.png" alt="AquaLink Logo" style={{ width: "48px", height: "48px", objectFit: "contain", borderRadius: "50%" }} />
+    <div className="page-container dashboard-page">
+      <PageHeader
+        eyebrow="AquaLink decision support"
+        title="Pune water intelligence"
+        description="District-wide water stress monitoring and intervention prioritisation."
+      >
+        <div className="data-state-pill">
+          <span className="live-dot" />
           <div>
-            <span className="brand-eyebrow">
-              AQUA-LINK • DECISION SUPPORT SYSTEM
-            </span>
-
-            <h1>Pune Water Intelligence</h1>
-
-            <p>
-              District-wide water stress monitoring and
-              intervention prioritization
-            </p>
+            <strong>Dataset active</strong>
+            <small>{totalLocations} records analysed</small>
           </div>
         </div>
+      </PageHeader>
 
-        <div className="dataset-status">
-          <span className="status-dot" />
-
-          <div>
-            <strong>Dataset Active</strong>
-            <span>
-              {totalLocations} records analysed
-            </span>
-          </div>
-        </div>
-      </header>
-
-      {/* ===================================================
-          DISTRICT HERO
-      =================================================== */}
-
-      <section className="district-hero">
-
-        <div className="hero-content">
-          <span className="section-eyebrow">
-            DISTRICT WATER STRESS
-          </span>
-
-          <div className="hero-score">
-            {districtScore}
-            <span>/100</span>
-          </div>
-
-          <p>
-            Average water stress across all monitored
-            locations in Pune District
-          </p>
-
-          <div className="hero-risk">
-            <span>CURRENT RISK</span>
-
-            <strong className={getRiskClass(districtRisk)}>
-              {districtRisk}
-            </strong>
-
-            <span>
-              Based on {totalLocations} monitored records
-            </span>
-          </div>
-        </div>
-
-        <div className="hero-water-decoration" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <img src="/logo.png" alt="AquaLink Logo" style={{ width: "110px", height: "110px", objectFit: "cover", borderRadius: "50%", border: "3px solid rgba(255,255,255,0.8)", boxShadow: "0 10px 30px rgba(15,23,42,0.15)" }} />
-        </div>
-
-      </section>
-
-
-      {/* ===================================================
-          KPI CARDS
-      =================================================== */}
-
-      <section className="kpi-grid">
-
-        <KpiCard
-          icon="📍"
-          label="TALUKAS MONITORED"
-          value={totalTalukas}
-          subtitle="Unique talukas"
-        />
-
-        <KpiCard
-          icon="⚠️"
-          label="HIGH-RISK TALUKAS"
-          value={highRiskTalukas}
-          subtitle="Average score 30–31"
-          variant="kpi-high"
-        />
-
-        <KpiCard
-          icon="🚨"
-          label="CRITICAL TALUKAS"
-          value={criticalTalukas}
-          subtitle="Average score 32+"
-          variant="kpi-critical"
-        />
-
-        <KpiCard
-          icon="📊"
-          label="MONITORED LOCATIONS"
-          value={totalLocations}
-          subtitle="All source records"
-        />
-
-      </section>
-
-      
-      {/* ===================================================
-          INTERVENTION PRIORITY
-      =================================================== */}
-
-      <section className="dashboard-section intervention-section">
-
-        <div className="section-heading">
-          <div>
-            <span className="section-eyebrow">
-              INTERVENTION PRIORITY
-            </span>
-
-            <h2>Priority Talukas</h2>
-
-            <p>
-              Talukas with the highest average water stress
-            </p>
-          </div>
-
-          <span className="section-meta">
-            TOP 5
-          </span>
-        </div>
-
-        <div className="priority-table">
-
-          <div className="priority-table-header">
-            <span>RANK</span>
-            <span>TALUKA</span>
-            <span>RECORDS</span>
-            <span>RISK</span>
-            <span>SCORE</span>
-          </div>
-
-          {priorityTalukas.map((item, index) => (
-            <div
-              className="priority-row"
-              key={`${item.rawName}-${index}`}
-            >
-
-              <div className="priority-rank">
-                {String(index + 1).padStart(2, "0")}
-              </div>
-
-              <div className="priority-name">
-                <strong>{item.name}</strong>
-              </div>
-
-              <div className="priority-records">
-                {item.records} records
-              </div>
-
-              <div>
-                <span
-                  className={`risk-pill ${getRiskClass(
-                    item.risk
-                  )}`}
-                >
-                  {item.risk}
-                </span>
-              </div>
-
-              <div className="priority-score">
-                <strong>{item.score}</strong>
-                <span>/100</span>
-              </div>
-
+      <FadeInUp>
+        <section className="district-hero">
+          <div className="hero-glow" aria-hidden="true" />
+          <div className="hero-content">
+            <span className="eyebrow">District water stress</span>
+            <div className="hero-score">
+              {districtScore}
+              <span>/100</span>
             </div>
-          ))}
-
-        </div>
-      </section>
-
-      {/* ===================================================
-          RISK DISTRIBUTION
-      =================================================== */}
-
-      <RiskDistribution
-        distribution={distribution}
-        total={totalLocations}
-      />
-
-      {/* ===================================================
-          TALUKA OVERVIEW
-      =================================================== */}
-
-      <section className="dashboard-section taluka-section">
-
-        <div className="section-heading">
-          <div>
-            <span className="section-eyebrow">
-              TALUKA OVERVIEW
-            </span>
-
-            <h2>Water Stress by Taluka</h2>
-
-            <p>
-              Average water stress calculated from all
-              available records
-            </p>
+            <p>Average score across all monitored Pune District locations.</p>
+            <div className="hero-status-row">
+              <StatusBadge status={districtRisk} />
+              <span>{locationsRequiringAttention} locations need priority attention</span>
+            </div>
           </div>
+          <div className="hero-orbit" aria-hidden="true">
+            <div className="hero-orbit-ring" />
+            <Waves size={58} strokeWidth={1.2} />
+          </div>
+        </section>
+      </FadeInUp>
 
-          <span className="section-meta">
-            {totalTalukas} TALUKAS
-          </span>
-        </div>
+      <FadeInUp delay={80}>
+        <section className="metric-grid">
+          <MetricCard icon={MapPin} label="Talukas monitored" value={totalTalukas} detail="Unique talukas" />
+          <MetricCard icon={AlertTriangle} label="High-risk talukas" value={highRiskTalukas} detail="Contain a score of 45–64" tone="warning" />
+          <MetricCard icon={ShieldAlert} label="Critical talukas" value={criticalTalukas} detail="Contain a score of 65+" tone="danger" />
+          <MetricCard icon={Radar} label="Monitored locations" value={totalLocations} detail="Latest source records" tone="blue" />
+        </section>
+      </FadeInUp>
 
-        <div className="taluka-chart-card">
+      <FadeInUp>
+        <section className="surface-card dashboard-section">
+          <SectionHeading
+            eyebrow="Intervention priority"
+            title="Priority talukas"
+            description="Talukas containing the most severe monitored hotspots."
+            meta="Top 5"
+          />
+          <div className="table-scroll">
+            <table className="data-table priority-table">
+              <thead>
+                <tr>
+                  <th scope="col">Rank</th>
+                  <th scope="col">Taluka</th>
+                  <th scope="col">Records</th>
+                  <th scope="col">Risk</th>
+                  <th scope="col">Avg score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {priorityTalukas.map((item, index) => (
+                  <tr key={item.rawName}>
+                    <td><span className="rank-number">{String(index + 1).padStart(2, "0")}</span></td>
+                    <td><strong>{item.name}</strong></td>
+                    <td>{item.records} records</td>
+                    <td><StatusBadge status={item.risk} /></td>
+                    <td><strong>{item.score}</strong><span className="table-unit">/100</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </FadeInUp>
 
+      <FadeInUp>
+        <RiskDistribution distribution={distribution} total={totalLocations} />
+      </FadeInUp>
+
+      <FadeInUp>
+        <section className="surface-card dashboard-section">
+          <SectionHeading
+            eyebrow="Taluka overview"
+            title="Water stress by taluka"
+            description="Average water stress calculated from all available records."
+            meta={`${totalTalukas} talukas`}
+          />
           <div className="taluka-chart">
-
-            {talukas.map((item, index) => {
-
-              const width = Math.min(
-                Math.max((item.score / 40) * 100, 5),
-                100
-              );
-
-              return (
-                <div
-                  className="taluka-bar-row"
-                  key={`${item.rawName}-${index}`}
-                >
-
-                  <div className="taluka-bar-label">
-                    {item.name}
-                  </div>
-
-                  <div className="taluka-bar-track">
-                    <div
-                      className={`taluka-bar ${getRiskClass(
-                        item.risk
-                      )}`}
-                      style={{ width: `${width}%` }}
-                    />
-                  </div>
-
-                  <div className="taluka-bar-score">
-                    {item.score}
-                  </div>
-
+            {talukas.map((item) => (
+              <div className="taluka-bar-row" key={item.rawName}>
+                <span className="taluka-bar-label">{item.name}</span>
+                <div className="taluka-bar-track">
+                  <span
+                    className={`taluka-bar-fill risk-${item.averageRisk.toLowerCase()}`}
+                    style={{ width: `${Math.max(item.score, 2)}%` }}
+                  />
                 </div>
-              );
-            })}
-
+                <strong>{item.score}</strong>
+              </div>
+            ))}
           </div>
-
-          <div className="chart-legend">
-
-            <div>
-              <span className="legend-dot low" />
-              Low &lt; 25
-            </div>
-
-            <div>
-              <span className="legend-dot moderate" />
-              Moderate 25–44
-            </div>
-
-            <div>
-              <span className="legend-dot high" />
-              High 45–64
-            </div>
-
-            <div>
-              <span className="legend-dot critical" />
-              Critical 65+
-            </div>
-
+          <div className="risk-legend" aria-label="Water stress risk thresholds">
+            {riskCategories.map((risk) => (
+              <span key={risk} className={`risk-${risk.toLowerCase()}`}>
+                <i /> {risk}
+              </span>
+            ))}
           </div>
+        </section>
+      </FadeInUp>
 
-
-        </div>
-      </section>
-
-      {/* ===================================================
-          FOOTER INSIGHT
-      =================================================== */}
-
-      <footer className="dashboard-footer">
-
-        <div className="footer-mark">
-          💡
-        </div>
-
-        <div>
-          <span className="section-eyebrow">
-            AQUA-LINK INSIGHT
-          </span>
-
-          <h3>
-            Focus intervention on high-stress areas
-          </h3>
-
-          <p>
-            {distribution.Critical} locations are in the
-            critical category and require immediate
-            attention.
-          </p>
-
-          <span className="footer-note">
-            Aqua-Link Decision Support System • Pune
-            District
-          </span>
-        </div>
-
-      </footer>
-
-    </main>
+      <FadeInUp>
+        <aside className="insight-banner">
+          <span className="insight-icon" aria-hidden="true"><Activity /></span>
+          <div>
+            <span className="eyebrow">AquaLink insight</span>
+            <h2>Focus intervention on high-stress areas</h2>
+            <p>{distribution.Critical} locations are currently critical and require immediate attention.</p>
+          </div>
+          <ArrowUpRight aria-hidden="true" />
+        </aside>
+      </FadeInUp>
+    </div>
   );
 }
+
+export default Dashboard;

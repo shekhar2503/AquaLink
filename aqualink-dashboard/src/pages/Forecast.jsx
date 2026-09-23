@@ -1,1079 +1,213 @@
-import { useEffect, useState } from "react";
-
+import { useEffect, useMemo, useState } from "react";
 import {
-  LineChart,
+  Activity,
+  CalendarRange,
+  Gauge,
+  Info,
+  Minus,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
+import {
+  CartesianGrid,
   Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
 } from "recharts";
-
+import FadeInUp from "../components/FadeInUp";
 import {
-  loadPuneHistoricalData,
-} from "../utils/loadAquaLinkData";
+  EmptyState,
+  LoadingState,
+  MetricCard,
+  PageHeader,
+  SectionHeading,
+  StatusBadge,
+} from "../components/ui";
+import { loadPuneHistoricalData } from "../utils/loadAquaLinkData";
+import { getRiskLevel } from "../utils/waterMetrics";
 
+const tooltipStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: "12px",
+  color: "var(--text)",
+  boxShadow: "var(--shadow-card)",
+};
 
 function Forecast() {
-
   const [historicalData, setHistoricalData] = useState([]);
   const [loading, setLoading] = useState(true);
-
-
-  // =========================================
-  // LOAD DATA
-  // =========================================
+  const [error, setError] = useState("");
 
   useEffect(() => {
-
+    let active = true;
     loadPuneHistoricalData()
       .then((result) => {
-
-        console.log(
-          "Pune Historical Data:",
-          result
-        );
-
-        setHistoricalData(result);
-        setLoading(false);
-
+        if (active) setHistoricalData(Array.isArray(result) ? result : []);
       })
-      .catch((error) => {
-
-        console.error(
-          "Error loading historical data:",
-          error
-        );
-
-        setLoading(false);
-
+      .catch((loadError) => {
+        console.error("Error loading historical data:", loadError);
+        if (active) setError("Historical water stress data could not be loaded.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-
+    return () => {
+      active = false;
+    };
   }, []);
 
-
-  // =========================================
-  // LOADING
-  // =========================================
-
-  if (loading) {
-
-    return (
-      <div className="forecast-page">
-
-        <div className="forecast-header">
-
-          <div>
-
-            <span className="section-label">
-              PREDICTIVE ANALYTICS
-            </span>
-
-            <h1>
-              Water Stress Forecast
-            </h1>
-
-            <p>
-              Historical trend and projected water
-              stress for Pune District
-            </p>
-
-          </div>
-
-        </div>
-
-        <div className="forecast-loading">
-
-          <p>
-            Loading historical data...
-          </p>
-
-        </div>
-
-      </div>
-    );
-
-  }
-
-
-  // =========================================
-  // NO DATA
-  // =========================================
-
-  if (!historicalData.length) {
-
-    return (
-      <div className="forecast-page">
-
-        <div className="forecast-header">
-
-          <div>
-
-            <span className="section-label">
-              PREDICTIVE ANALYTICS
-            </span>
-
-            <h1>
-              Water Stress Forecast
-            </h1>
-
-            <p>
-              Historical trend and projected water
-              stress for Pune District
-            </p>
-
-          </div>
-
-        </div>
-
-        <div className="forecast-loading">
-
-          <h2>
-            No historical data available
-          </h2>
-
-          <p>
-            Please check the CSV data and try again.
-          </p>
-
-        </div>
-
-      </div>
-    );
-
-  }
-
-
-  // =========================================
-  // PREPARE YEAR-WISE DATA
-  // =========================================
-
-  const yearMap = {};
-
-
-  historicalData.forEach((row) => {
-
-    const year = Number(row.Year);
-
-    const score =
-      Number(row.Water_Stress_Score);
-
-
-    if (
-      isNaN(year) ||
-      isNaN(score)
-    ) {
-      return;
-    }
-
-
-    if (!yearMap[year]) {
-
-      yearMap[year] = {
-        total: 0,
-        count: 0,
-      };
-
-    }
-
-
-    yearMap[year].total += score;
-
-    yearMap[year].count += 1;
-
-  });
-
-
-  // =========================================
-  // YEARLY AVERAGE
-  // =========================================
-
-  const yearlyData = Object.entries(yearMap)
-
-    .map(([year, values]) => {
-
-      const average =
-        values.total / values.count;
-
-      return {
-        year: Number(year),
-        score: Number(
-          average.toFixed(1)
-        ),
-      };
-
-    })
-
-    .sort(
-      (a, b) => a.year - b.year
-    );
-
-
-  // =========================================
-  // CURRENT SCORE
-  // =========================================
-
-  const currentData =
-    yearlyData[yearlyData.length - 1];
-
-
-  const previousData =
-    yearlyData.length >= 2
-      ? yearlyData[yearlyData.length - 2]
-      : null;
-
-
-  const currentScore =
-    currentData?.score || 0;
-
-
-  // =========================================
-  // YEARLY CHANGE
-  // =========================================
-
-  const yearlyChange =
-    previousData
-      ? Number(
-          (
-            currentScore -
-            previousData.score
-          ).toFixed(1)
-        )
-      : 0;
-
-
-  // =========================================
-  // FORECAST
-  // =========================================
-
-  const forecastYears = 3;
-
-
-  const forecastValues = [];
-
-
-  for (
-    let i = 1;
-    i <= forecastYears;
-    i++
-  ) {
-
-    const predicted =
-      Math.min(
-        100,
-        Math.max(
-          0,
-          currentScore +
-            yearlyChange * i
-        )
-      );
-
-
-    forecastValues.push({
-
-      year:
-        currentData.year + i,
-
-      score:
-        Number(
-          predicted.toFixed(1)
-        ),
-
+  const forecast = useMemo(() => {
+    const years = new Map();
+    historicalData.forEach((row) => {
+      const year = Number(row.Year);
+      const score = Number(row.Water_Stress_Score);
+      if (!Number.isFinite(year) || !Number.isFinite(score)) return;
+      const values = years.get(year) || [];
+      values.push(score);
+      years.set(year, values);
     });
 
+    const yearlyData = [...years.entries()]
+      .map(([year, values]) => ({
+        year,
+        score: Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1)),
+      }))
+      .sort((a, b) => a.year - b.year);
+
+    if (!yearlyData.length) return null;
+    const current = yearlyData.at(-1);
+    const previous = yearlyData.at(-2);
+    const yearlyChange = previous ? Number((current.score - previous.score).toFixed(1)) : 0;
+    const projected = Array.from({ length: 3 }, (_, index) => ({
+      year: current.year + index + 1,
+      score: Number(Math.min(100, Math.max(0, current.score + yearlyChange * (index + 1))).toFixed(1)),
+    }));
+    const chartData = [
+      ...yearlyData.map((item) => ({
+        year: item.year,
+        historical: item.score,
+        projected: item.year === current.year ? current.score : null,
+      })),
+      ...projected.map((item) => ({ year: item.year, historical: null, projected: item.score })),
+    ];
+    const outlook = [
+      ...yearlyData.map((item) => ({ ...item, type: "Historical" })),
+      ...projected.map((item) => ({ ...item, type: "Forecast" })),
+    ];
+
+    return { yearlyData, current, yearlyChange, projected, chartData, outlook };
+  }, [historicalData]);
+
+  if (loading) {
+    return <div className="page-container"><LoadingState title="Loading water stress forecast" /></div>;
   }
 
+  if (error || !forecast) {
+    return (
+      <div className="page-container">
+        <EmptyState error={Boolean(error)} title="Forecast data unavailable" description={error || "No valid historical years were found in the dataset."} />
+      </div>
+    );
+  }
 
-  // =========================================
-  // CHART DATA
-  // =========================================
-
-  const chartData = [
-
-    ...yearlyData.map(
-      (item) => ({
-
-        year: item.year,
-
-        historical:
-          item.score,
-
-        forecast:
-          null,
-
-      })
-    ),
-
-
-    // Connect forecast to current year
-    {
-      year: currentData.year,
-
-      historical: null,
-
-      forecast: currentScore,
-
-    },
-
-
-    ...forecastValues.map(
-      (item) => ({
-
-        year: item.year,
-
-        historical: null,
-
-        forecast: item.score,
-
-      })
-    ),
-
-  ];
-
-
-  // =========================================
-  // RISK LEVEL
-  // =========================================
-
-  const getRiskLevel = (score) => {
-    const value = Number(score);
-
-    if (value >= 65) return "Critical";
-    if (value >= 45) return "High";
-    if (value >= 25) return "Moderate";
-
-    return "Low";
-  };
-
-
-
-  // =========================================
-  // RISK CLASS
-  // =========================================
-
-  const getRiskClass = (score) => {
-
-    const risk =
-      getRiskLevel(score);
-
-    return risk.toLowerCase();
-
-  };
-
-
-  // =========================================
-  // FINAL FORECAST SCORE
-  // =========================================
-
-  const finalForecast =
-    forecastValues.length > 0
-      ? forecastValues[
-          forecastValues.length - 1
-        ].score
-      : currentScore;
-
-
-  // =========================================
-  // TREND
-  // =========================================
-
-  const getTrendText = () => {
-
-    if (yearlyChange < 0) {
-      return "Decreasing";
-    }
-
-    if (yearlyChange > 0) {
-      return "Increasing";
-    }
-
-    return "Stable";
-
-  };
-
-
-  const trendText =
-    getTrendText();
-
-
-  // =========================================
-  // OUTLOOK DATA
-  // =========================================
-
-  const outlookData = [
-
-    ...yearlyData.map(
-      (item) => ({
-
-        year: item.year,
-
-        type: "Historical",
-
-        score: item.score,
-
-        risk:
-          getRiskLevel(item.score),
-
-      })
-    ),
-
-
-    ...forecastValues.map(
-      (item) => ({
-
-        year: item.year,
-
-        type: "Forecast",
-
-        score: item.score,
-
-        risk:
-          getRiskLevel(item.score),
-
-      })
-    ),
-
-  ];
-
-
-  // =========================================
-  // RETURN
-  // =========================================
+  const { current, yearlyChange, projected, chartData, outlook } = forecast;
+  const finalForecast = projected.at(-1)?.score ?? current.score;
+  const trendText = yearlyChange < 0 ? "Improving" : yearlyChange > 0 ? "Worsening" : "Stable";
+  const TrendIcon = yearlyChange < 0 ? TrendingDown : yearlyChange > 0 ? TrendingUp : Minus;
 
   return (
+    <div className="page-container forecast-page">
+      <PageHeader
+        eyebrow="Predictive analytics"
+        title="Water stress forecast"
+        description="Historical trend and three-year planning outlook for Pune District."
+      >
+        <div className="method-badge"><Activity size={16} aria-hidden="true" /><span>Trend projection</span></div>
+      </PageHeader>
 
-    <div className="forecast-page">
+      <FadeInUp>
+        <section className="metric-grid">
+          <MetricCard icon={Gauge} label="Current stress" value={current.score.toFixed(1)} suffix="/100" detail={`${current.year} observed`} />
+          <MetricCard icon={Activity} label="Current risk" value={getRiskLevel(current.score)} detail="Latest available data" tone="warning" />
+          <MetricCard icon={CalendarRange} label="Forecast score" value={finalForecast.toFixed(1)} suffix="/100" detail={`Projected ${projected.at(-1)?.year}`} tone="blue" />
+          <MetricCard icon={TrendIcon} label="Trend" value={trendText} detail={`${yearlyChange > 0 ? "+" : ""}${yearlyChange} points/year`} tone={yearlyChange > 0 ? "danger" : yearlyChange < 0 ? "success" : "aqua"} />
+        </section>
+      </FadeInUp>
 
-
-      {/* =====================================
-          HEADER
-      ===================================== */}
-
-      <div className="forecast-header">
-
-        <div>
-
-          <span className="section-label">
-            PREDICTIVE ANALYTICS
-          </span>
-
-          <h1>
-            Water Stress Forecast
-          </h1>
-
-          <p>
-            Historical trend and projected water
-            stress for Pune District
-          </p>
-
-        </div>
-
-
-        <div className="forecast-badge">
-          Statistical OLS Model
-        </div>
-
-
-      </div>
-
-
-      {/* =====================================
-          SUMMARY CARDS
-      ===================================== */}
-
-      <div className="forecast-summary">
-
-
-        {/* CURRENT STRESS */}
-
-        <div className="forecast-stat">
-
-          <span>
-            CURRENT STRESS
-          </span>
-
-          <strong>
-            {currentScore.toFixed(1)}
-          </strong>
-
-          <small>
-            /100
-          </small>
-
-        </div>
-
-
-        {/* CURRENT RISK */}
-
-        <div className="forecast-stat">
-
-          <span>
-            CURRENT RISK
-          </span>
-
-          <strong>
-            {getRiskLevel(
-              currentScore
-            )}
-          </strong>
-
-          <small>
-            Latest available data
-          </small>
-
-        </div>
-
-
-        {/* FORECAST */}
-
-        <div className="forecast-stat">
-
-          <span>
-            FORECAST SCORE
-          </span>
-
-          <strong>
-            {finalForecast.toFixed(1)}
-          </strong>
-
-          <small>
-            Projected {currentData.year + 3}
-          </small>
-
-        </div>
-
-
-        {/* TREND */}
-
-        <div className="forecast-stat">
-
-          <span>
-            TREND
-          </span>
-
-          <strong
-            className={
-              yearlyChange < 0
-                ? "trend-positive"
-                : yearlyChange > 0
-                ? "trend-negative"
-                : ""
-            }
-          >
-
-            {yearlyChange < 0
-              ? "↓ Decreasing"
-              : yearlyChange > 0
-              ? "↑ Increasing"
-              : "→ Stable"}
-
-          </strong>
-
-          <small>
-
-            {yearlyChange > 0
-              ? `+${yearlyChange}`
-              : yearlyChange}
-
-            {" "}points/year
-
-          </small>
-
-        </div>
-
-
-      </div>
-
-
-      {/* =====================================
-          TREND CHART
-      ===================================== */}
-
-      <div className="forecast-card">
-
-
-        <div className="forecast-chart-header">
-
-          <div>
-
-            <span className="section-label">
-              TREND ANALYSIS
-            </span>
-
-            <h2>
-              Water Stress Trend
-            </h2>
-
-            <p>
-              Historical Pune water stress with
-              projected trend
-            </p>
-
+      <FadeInUp>
+        <section className="surface-card forecast-chart-card">
+          <SectionHeading
+            eyebrow="Trend analysis"
+            title="Water stress trend"
+            description="Observed Pune water stress with a three-year trend extension."
+            meta={`${current.year} baseline`}
+          />
+          <div className="forecast-chart">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 20, right: 24, left: 0, bottom: 8 }}>
+                <CartesianGrid stroke="var(--border-soft)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="year" stroke="var(--text-muted)" tick={{ fill: "var(--text-secondary)", fontSize: 12 }} />
+                <YAxis domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} stroke="var(--text-muted)" tick={{ fill: "var(--text-secondary)", fontSize: 12 }} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`${value}/100`, "Water stress"]} />
+                <ReferenceLine y={65} stroke="#fb7185" strokeDasharray="6 6" label={{ value: "Critical 65", fill: "#fda4af", fontSize: 11, position: "insideTopRight" }} />
+                <Line type="monotone" dataKey="historical" name="Historical" stroke="#22d3ee" strokeWidth={3} dot={{ r: 4, fill: "#22d3ee", strokeWidth: 0 }} activeDot={{ r: 6 }} connectNulls={false} />
+                <Line type="monotone" dataKey="projected" name="Forecast" stroke="#60a5fa" strokeWidth={3} strokeDasharray="8 6" dot={{ r: 4, fill: "#60a5fa", strokeWidth: 0 }} activeDot={{ r: 6 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-
-        </div>
-
-
-        <div
-          style={{
-            width: "100%",
-            height: "430px",
-          }}
-        >
-
-          <ResponsiveContainer
-            width="100%"
-            height="100%"
-          >
-
-            <LineChart
-              data={chartData}
-              margin={{
-                top: 20,
-                right: 30,
-                left: 15,
-                bottom: 10,
-              }}
-            >
-
-              <CartesianGrid
-                strokeDasharray="3 3"
-              />
-
-
-              <XAxis
-                dataKey="year"
-                tick={{
-                  fontSize: 12,
-                }}
-              />
-
-
-              <YAxis
-                domain={[0, 100]}
-                ticks={[
-                  0,
-                  20,
-                  40,
-                  60,
-                  80,
-                  100,
-                ]}
-                label={{
-                  value:
-                    "Water Stress Score",
-                  angle: -90,
-                  position:
-                    "insideLeft",
-                }}
-              />
-
-
-              <Tooltip
-                formatter={(value) => [
-                  `${value}/100`,
-                  "Water Stress",
-                ]}
-              />
-
-
-              {/* CRITICAL THRESHOLD */}
-
-              <ReferenceLine
-                y={65}
-                stroke="#dc2626"
-                strokeDasharray="6 6"
-                label={{
-                  value:
-                    "Critical ≥65",
-                  position:
-                    "insideTopRight",
-                }}
-              />
-
-
-
-              {/* HISTORICAL */}
-
-              <Line
-                type="monotone"
-                dataKey="historical"
-                stroke="#2563eb"
-                strokeWidth={3}
-                dot={{
-                  r: 5,
-                }}
-                connectNulls={false}
-                name="Historical data"
-              />
-
-
-              {/* FORECAST */}
-
-              <Line
-                type="monotone"
-                dataKey="forecast"
-                stroke="#dc2626"
-                strokeWidth={3}
-                strokeDasharray="8 6"
-                dot={{
-                  r: 5,
-                }}
-                connectNulls={true}
-                name="Forecast trend"
-              />
-
-            </LineChart>
-
-          </ResponsiveContainer>
-
-        </div>
-
-
-        {/* CHART LEGEND */}
-
-        <div className="forecast-chart-legend">
-
-          <div>
-
-            <span
-              className="forecast-legend-dot historical"
-            ></span>
-
-            Historical data
-
+          <div className="chart-legend-row">
+            <span><i className="legend-line historical" />Historical data</span>
+            <span><i className="legend-line projected" />Forecast trend</span>
+            <span><i className="legend-line critical" />Critical threshold</span>
           </div>
+        </section>
+      </FadeInUp>
 
-
-          <div>
-
-            <span
-              className="forecast-legend-dot forecast"
-            ></span>
-
-            Forecast trend
-
+      <FadeInUp>
+        <section className="surface-card forecast-outlook-card">
+          <SectionHeading
+            eyebrow="Projection summary"
+            title="Forecast outlook"
+            description="Historical observations and projected water stress levels."
+            meta="Trend based"
+          />
+          <div className="outlook-summary">
+            <div><span>Current</span><strong>{current.score.toFixed(1)}</strong><small>/100</small></div>
+            <div><span>Forecast</span><strong>{finalForecast.toFixed(1)}</strong><small>/100</small></div>
+            <div><span>Trend</span><strong className={yearlyChange > 0 ? "text-danger" : "text-success"}>{trendText}</strong></div>
           </div>
-
-
-          <div>
-
-            <span
-              className="forecast-legend-dot critical"
-            ></span>
-
-            Critical threshold ≥65
-
-          </div>
-
-
-        </div>
-
-      </div>
-
-
-      {/* =====================================
-          FORECAST OUTLOOK
-      ===================================== */}
-
-      <div className="forecast-outlook-card">
-
-
-        {/* HEADER */}
-
-        <div className="forecast-outlook-header">
-
-          <div>
-
-            <span className="section-label">
-              PROJECTION SUMMARY
-            </span>
-
-            <h2>
-              Forecast Outlook
-            </h2>
-
-            <p>
-              Historical observations and projected
-              water stress levels
-            </p>
-
-          </div>
-
-
-          <div className="forecast-outlook-badge">
-            Trend Based
-          </div>
-
-        </div>
-
-
-        {/* SUMMARY */}
-
-        <div className="outlook-summary">
-
-
-          <div className="outlook-summary-item">
-
-            <span>
-              CURRENT
-            </span>
-
-            <strong>
-              {currentScore.toFixed(1)}
-            </strong>
-
-            <small>
-              /100
-            </small>
-
-          </div>
-
-
-          <div className="outlook-summary-item">
-
-            <span>
-              FORECAST
-            </span>
-
-            <strong>
-              {finalForecast.toFixed(1)}
-            </strong>
-
-            <small>
-              /100
-            </small>
-
-          </div>
-
-
-          <div className="outlook-summary-item">
-
-            <span>
-              TREND
-            </span>
-
-            <strong
-              className={
-                yearlyChange < 0
-                  ? "trend-positive"
-                  : yearlyChange > 0
-                  ? "trend-negative"
-                  : ""
-              }
-            >
-
-              {yearlyChange < 0
-                ? "↓ Improving"
-                : yearlyChange > 0
-                ? "↑ Worsening"
-                : "→ Stable"}
-
-            </strong>
-
-          </div>
-
-        </div>
-
-
-        {/* TABLE */}
-
-        <div className="forecast-table-wrapper">
-
-          <table className="forecast-table">
-
-            <thead>
-
-              <tr>
-
-                <th>
-                  YEAR
-                </th>
-
-                <th>
-                  TYPE
-                </th>
-
-                <th>
-                  STRESS SCORE
-                </th>
-
-                <th>
-                  RISK LEVEL
-                </th>
-
-                <th>
-                  STATUS
-                </th>
-
-              </tr>
-
-            </thead>
-
-
-            <tbody>
-
-              {outlookData.map(
-                (item, index) => {
-
-                  const isForecast =
-                    item.type ===
-                    "Forecast";
-
-
+          <div className="table-scroll">
+            <table className="data-table forecast-table">
+              <thead><tr><th scope="col">Year</th><th scope="col">Type</th><th scope="col">Stress score</th><th scope="col">Risk level</th><th scope="col">Status</th></tr></thead>
+              <tbody>
+                {outlook.map((item) => {
+                  const risk = getRiskLevel(item.score);
                   return (
-
-                    <tr
-                      key={`${item.year}-${index}`}
-                      className={
-                        isForecast
-                          ? "forecast-row"
-                          : ""
-                      }
-                    >
-
-
-                      {/* YEAR */}
-
-                      <td>
-
-                        <strong>
-                          {item.year}
-                        </strong>
-
-                      </td>
-
-
-                      {/* TYPE */}
-
-                      <td>
-
-                        <span
-                          className={
-                            isForecast
-                              ? "forecast-type"
-                              : "historical-type"
-                          }
-                        >
-
-                          {item.type}
-
-                        </span>
-
-                      </td>
-
-
-                      {/* SCORE */}
-
-                      <td>
-
-                        <div className="forecast-score-cell">
-
-                          <strong>
-                            {item.score.toFixed(1)}
-                          </strong>
-
-                          <span>
-                            /100
-                          </span>
-
-                        </div>
-
-                      </td>
-
-
-                      {/* RISK */}
-
-                      <td>
-
-                        <span
-                          className={`risk-pill ${getRiskClass(
-                            item.score
-                          )}`}
-                        >
-
-                          <span className="risk-pill-dot"></span>
-
-                          {item.risk}
-
-                        </span>
-
-                      </td>
-
-
-                      {/* STATUS */}
-
-                      <td>
-
-                        <span
-                          className={
-                            isForecast
-                              ? "status-projected"
-                              : "status-observed"
-                          }
-                        >
-
-                          {isForecast
-                            ? "Projected"
-                            : "Observed"}
-
-                        </span>
-
-                      </td>
-
+                    <tr key={`${item.year}-${item.type}`} className={item.type === "Forecast" ? "forecast-row" : ""}>
+                      <td><strong>{item.year}</strong></td>
+                      <td><span className={`type-badge ${item.type.toLowerCase()}`}>{item.type}</span></td>
+                      <td><strong>{item.score.toFixed(1)}</strong><span className="table-unit">/100</span></td>
+                      <td><StatusBadge status={risk} /></td>
+                      <td>{item.type === "Forecast" ? "Projected" : "Observed"}</td>
                     </tr>
-
                   );
-
-                }
-              )}
-
-            </tbody>
-
-          </table>
-
-        </div>
-
-
-        {/* INFORMATION NOTE */}
-
-        <div className="forecast-outlook-note">
-
-          <span className="forecast-note-icon">
-            💡
-          </span>
-
-          <div>
-
-            <strong>
-              Forecast interpretation
-            </strong>
-
-            <p>
-              The projection extends the observed
-              year-to-year change in Pune's
-              historical water stress score.
-              It should be treated as a trend
-              indicator for planning and
-              decision support rather than a
-              definitive predictive model.
-            </p>
-
+                })}
+              </tbody>
+            </table>
           </div>
-
-        </div>
-
-
-      </div>
-
-
+          <aside className="info-note">
+            <Info size={19} aria-hidden="true" />
+            <div><strong>Forecast interpretation</strong><p>The projection extends the observed year-to-year change. Use it as a planning indicator rather than a definitive prediction.</p></div>
+          </aside>
+        </section>
+      </FadeInUp>
     </div>
-
   );
-
 }
-
 
 export default Forecast;
