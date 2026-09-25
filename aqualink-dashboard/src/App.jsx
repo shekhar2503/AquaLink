@@ -13,9 +13,7 @@ function App() {
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem("aqualink-theme");
     if (savedTheme === "light" || savedTheme === "dark") return savedTheme;
-    return window.matchMedia("(prefers-color-scheme: light)").matches
-      ? "light"
-      : "dark";
+    return "light";
   });
 
   useLayoutEffect(() => {
