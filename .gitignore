@@ -1,0 +1,51 @@
+# Node / frontend build output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+
+# Python caches and environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+pytest-cache-files-*/
+.venv/
+venv/
+env/
+
+# Local runtime data
+*.db
+*.sqlite
+*.sqlite3
+/AquaLink/backend/data/backups/
+
+# Environment files (keep documented examples)
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Logs and coverage output
+logs/
+*.log
+coverage/
+.coverage
+htmlcov/
+
+# Editor and operating-system files
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Accidental npm workspace files at the repository root
+/package-lock.json

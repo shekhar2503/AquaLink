@@ -5,6 +5,7 @@ Runs unit tests using Python's standard unittest framework.
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,7 +16,9 @@ if str(backend_dir) not in sys.path:
 
 from app.core import engine
 from app.core.forecasting import compute_ols_forecast
-from app.routers.iot import IoTTelemetryPayload, ingest_telemetry, toggle_simulation
+from app.core.iot_repository import IoTRepository
+from app.routers import iot as iot_router
+from app.routers.iot import IoTTelemetryPayload, ingest_telemetry, simulate_telemetry
 
 
 class TestAquaLinkBackend(unittest.TestCase):
@@ -68,7 +71,7 @@ class TestAquaLinkBackend(unittest.TestCase):
         scores = [30.0, 32.0, 34.0, 36.0, 38.0]
         forecast = compute_ols_forecast(years, scores, forecast_years=3)
 
-        self.assertEqual(forecast["model_type"], "Statistical Linear Regression Trend Forecast")
+        self.assertEqual(forecast["model_type"], "Ordinary Least Squares linear trend")
         self.assertEqual(forecast["slope"], 2.0)
         self.assertEqual(forecast["r_squared"], 1.0)
         self.assertEqual(len(forecast["forecast_projected"]), 3)
@@ -76,21 +79,26 @@ class TestAquaLinkBackend(unittest.TestCase):
         self.assertEqual(forecast["forecast_projected"][0]["projected_score"], 40.0)
 
     def test_iot_telemetry_ingestion_and_simulation(self):
+        previous_repository = iot_router.repository
+        iot_router.repository = IoTRepository(Path(tempfile.mkdtemp(prefix="aqualink-iot-unittest-")) / "iot.db")
         payload = IoTTelemetryPayload(
-            device_id="TEST_ESP32_01",
+            device_id="SIM-TEST-ESP32-01",
             location_id=999,
             groundwater_level=12.5,
             pipeline_pressure=0.85,
             flow_rate=22.0,
             is_simulated=True,
         )
-        res = ingest_telemetry(payload)
-        self.assertEqual(res["status"], "success")
-        self.assertEqual(res["record"]["status"], "NORMAL")
+        try:
+            res = ingest_telemetry(payload)
+            self.assertEqual(res["status"], "success")
+            self.assertEqual(res["record"]["telemetry_status"], "NORMAL")
 
-        sim_res = toggle_simulation(count=5)
-        self.assertEqual(sim_res["status"], "success")
-        self.assertEqual(len(sim_res["telemetry_sample"]), 5)
+            sim_res = simulate_telemetry(count=5)
+            self.assertEqual(sim_res["status"], "success")
+            self.assertEqual(len(sim_res["telemetry_sample"]), 5)
+        finally:
+            iot_router.repository = previous_repository
 
 
 if __name__ == "__main__":

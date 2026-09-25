@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import Forecast from "./pages/Forecast";
 import MapPage from "./pages/MapPage";
 import Recommendations from "./pages/Recommendations";
+import YearProvider from "./context/YearProvider";
 
 function App() {
   const [theme, setTheme] = useState(() => {
@@ -28,7 +29,7 @@ function App() {
   };
 
   return (
-    <BrowserRouter>
+    <YearProvider><BrowserRouter>
       <div className="app-shell">
         <Sidebar theme={theme} onToggleTheme={toggleTheme} />
         <main className="app-content">
@@ -44,7 +45,7 @@ function App() {
         </main>
         <AppFooter />
       </div>
-    </BrowserRouter>
+    </BrowserRouter></YearProvider>
   );
 }
 

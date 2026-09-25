@@ -1,0 +1,37 @@
+{
+  "valid": true,
+  "errors": [],
+  "statistics": {
+    "rows": 44430,
+    "columns": 31,
+    "locations": 7405,
+    "years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "districts": 36,
+    "talukas": 368,
+    "duplicate_location_year_pairs": 0,
+    "missing_required_values": 0,
+    "risk_distribution": {
+      "Moderate": 26285,
+      "Low": 10947,
+      "High": 7097,
+      "Critical": 101
+    }
+  },
+  "derived_mismatches": {
+    "Groundwater_Stress_Score": 0,
+    "Water_Supply_Gap_Score": 0,
+    "Water_Stress_Score": 0,
+    "Risk_Category": 0,
+    "Recommended_Action": 0
+  },
+  "canonical_path": "AquaLink/backend/data/aqualink_dataset.csv",
+  "fallback_path": "aqualink-dashboard/public/aqualinkData.csv",
+  "fallback_matches_canonical": true
+}

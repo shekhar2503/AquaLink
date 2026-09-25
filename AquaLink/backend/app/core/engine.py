@@ -11,6 +11,9 @@ docs/DATA_DICTIONARY.md) so scores stay consistent end-to-end.
 
 from __future__ import annotations
 from dataclasses import dataclass
+import math
+
+SCORING_VERSION = "aqualink-score-v1.1.0"
 
 
 @dataclass
@@ -30,6 +33,17 @@ class StressScores:
     water_stress_score: float
     risk_category: str
     recommended_action: str
+    recommendation: "Recommendation"
+
+
+@dataclass(frozen=True)
+class Recommendation:
+    action_code: str
+    priority: str
+    recommended_action: str
+    drivers: list[str]
+    rationale: str
+    score_version: str = SCORING_VERSION
 
 
 # ---- tunable weights (documented, exposed here so they're easy to demo/tweak) ----
@@ -51,11 +65,26 @@ RISK_THRESHOLDS = {
     "Critical": (65, 100.01),
 }
 
+
+def risk_thresholds_metadata() -> dict:
+    labels = list(RISK_THRESHOLDS)
+    return {
+        label: {
+            "minimum": bounds[0],
+            "maximum": 100 if label == "Critical" else bounds[1],
+            "minimum_inclusive": True,
+            "maximum_inclusive": index == len(labels) - 1,
+        }
+        for index, (label, bounds) in enumerate(RISK_THRESHOLDS.items())
+    }
+
 STAGE_NORMALIZATION_CAP = 130   # % extraction stage treated as "100" on the 0-100 scale
 FLUCTUATION_NORMALIZATION_CAP = 15  # metres of seasonal fluctuation treated as "100"
 
 
 def _clip(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError("Score inputs must be finite numbers")
     return max(lo, min(hi, value))
 
 
@@ -89,33 +118,67 @@ def combined_water_stress_score(gw_score: float, supply_score: float) -> float:
 
 
 def risk_category(score: float) -> str:
+    if not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 100:
+        raise ValueError("Water stress score must be a finite value between 0 and 100")
     for label, (lo, hi) in RISK_THRESHOLDS.items():
         if lo <= score < hi:
             return label
     return "Critical"
 
 
-def recommended_action(gw_score: float, supply_score: float, trend: str = "Stable") -> str:
+def recommendation_for(gw_score: float, supply_score: float, trend: str = "Stable") -> Recommendation:
     """
     Cause-and-effect decision matrix for interventions:
     Evaluates underlying stress drivers (Groundwater Extraction vs Supply Gap)
     and trend direction to output actionable intervention guidance.
     """
+    for name, value in (("groundwater", gw_score), ("supply-gap", supply_score)):
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 100:
+            raise ValueError(f"{name} score must be a finite value between 0 and 100")
+    if trend not in {"Improving", "Stable", "Declining", "Declining (Worsening)"}:
+        raise ValueError(f"Unsupported groundwater trend: {trend}")
+
     gw_high = gw_score >= 45.0
     supply_high = supply_score >= 45.0
     is_declining = trend in ["Declining (Worsening)", "Declining"]
 
     if gw_high and supply_high:
-        return "Groundwater recharge + Water-supply augmentation"
-    elif gw_high and not supply_high:
+        return Recommendation(
+            "compound_stress", "urgent", "Groundwater recharge + Water-supply augmentation",
+            ["groundwater_stress_high", "supply_gap_stress_high"],
+            "Both groundwater and water-supply stress scores meet the intervention threshold.",
+        )
+    if gw_high:
         if is_declining:
-            return "Urgent groundwater recharge & artificial extraction controls"
-        return "Groundwater conservation & extraction management"
-    elif not gw_high and supply_high:
-        return "Improve piped water-supply infrastructure & LPCD distribution"
-    elif is_declining:
-        return "Increase groundwater table monitoring & rainwater harvesting"
-    return "Monitor & maintain (low priority)"
+            return Recommendation(
+                "groundwater_declining", "urgent", "Urgent groundwater recharge & artificial extraction controls",
+                ["groundwater_stress_high", "groundwater_trend_declining"],
+                "Groundwater stress is high and the historical groundwater trend is declining.",
+            )
+        return Recommendation(
+            "groundwater_stress", "high", "Groundwater conservation & extraction management",
+            ["groundwater_stress_high"], "Groundwater stress meets the intervention threshold.",
+        )
+    if supply_high:
+        return Recommendation(
+            "supply_gap", "high", "Improve piped water-supply infrastructure & LPCD distribution",
+            ["supply_gap_stress_high"], "Water-supply gap stress meets the intervention threshold.",
+        )
+    if is_declining:
+        return Recommendation(
+            "declining_trend", "medium", "Increase groundwater table monitoring & rainwater harvesting",
+            ["groundwater_trend_declining"],
+            "The groundwater trend is declining even though current component scores are below intervention thresholds.",
+        )
+    return Recommendation(
+        "monitor", "routine", "Monitor & maintain (low priority)", ["scores_below_intervention_thresholds"],
+        "Groundwater and supply-gap stress scores are below intervention thresholds.",
+    )
+
+
+def recommended_action(gw_score: float, supply_score: float, trend: str = "Stable") -> str:
+    """Compatibility accessor for the dataset's stored action string."""
+    return recommendation_for(gw_score, supply_score, trend).recommended_action
 
 
 def explain_score(indicators: RawIndicators) -> dict:
@@ -134,11 +197,11 @@ def explain_score(indicators: RawIndicators) -> dict:
     )
     combined = combined_water_stress_score(gw, supply)
     risk = risk_category(combined)
-    action = recommended_action(gw, supply, indicators.gw_trend)
+    recommendation = recommendation_for(gw, supply, indicators.gw_trend)
 
-    gw_contrib = round(0.45 * gw, 1)
-    supply_contrib = round(0.45 * supply, 1)
-    interaction_contrib = round(0.10 * (gw * supply) / 100, 1)
+    gw_contrib = round(COMBINED_GW_WEIGHT * gw, 3)
+    supply_contrib = round(COMBINED_SUPPLY_WEIGHT * supply, 3)
+    interaction_contrib = round(COMBINED_INTERACTION_WEIGHT * (gw * supply) / 100, 3)
 
     tot = max(gw_contrib + supply_contrib + interaction_contrib, 0.1)
     gw_pct_share = round((gw_contrib / tot) * 100, 1)
@@ -162,6 +225,7 @@ def explain_score(indicators: RawIndicators) -> dict:
 
     return {
         "water_stress_score": combined,
+        "score_version": SCORING_VERSION,
         "risk_category": risk,
         "risk_classification_standard": "AquaLink project-defined risk classification thresholds",
         "groundwater_stress_score": gw,
@@ -173,9 +237,16 @@ def explain_score(indicators: RawIndicators) -> dict:
             "supply_gap_percentage_share": supply_pct_share,
             "interaction_contribution": interaction_contrib,
             "interaction_percentage_share": interaction_pct_share,
+            "unrounded_total": round(gw_contrib + supply_contrib + interaction_contrib, 3),
+            "weights": {
+                "groundwater": COMBINED_GW_WEIGHT,
+                "supply_gap": COMBINED_SUPPLY_WEIGHT,
+                "interaction": COMBINED_INTERACTION_WEIGHT,
+            },
         },
         "main_contributors": contributors,
-        "recommended_action": action,
+        "recommendation": recommendation.__dict__,
+        "recommended_action": recommendation.recommended_action,
     }
 
 
@@ -191,11 +262,43 @@ def score_area(indicators: RawIndicators) -> StressScores:
         indicators.supply_gap_pct,
     )
     combined = combined_water_stress_score(gw, supply)
+    recommendation = recommendation_for(gw, supply, indicators.gw_trend)
     return StressScores(
         groundwater_stress_score=gw,
         water_supply_gap_score=supply,
         water_stress_score=combined,
         risk_category=risk_category(combined),
-        recommended_action=recommended_action(gw, supply, indicators.gw_trend),
+        recommended_action=recommendation.recommended_action,
+        recommendation=recommendation,
     )
+
+
+def indicators_from_record(record: dict) -> RawIndicators:
+    """Build authoritative engine inputs from a canonical dataset record."""
+    return RawIndicators(
+        gw_extraction_stage_pct=float(record["GW_Extraction_Stage_pct"]),
+        seasonal_fluctuation_m=float(record["Seasonal_Fluctuation_m"]),
+        gw_trend=str(record["GW_Historical_Trend"]),
+        piped_coverage_pct=float(record["Piped_Water_Coverage_pct"]),
+        supply_gap_pct=float(record["Supply_Gap_pct"]),
+    )
+
+
+def authoritative_record(record: dict, verify_stored: bool = True) -> dict:
+    """Return engine-owned fields and reject stale stored derivations."""
+    scores = score_area(indicators_from_record(record))
+    expected = {
+        "Groundwater_Stress_Score": scores.groundwater_stress_score,
+        "Water_Supply_Gap_Score": scores.water_supply_gap_score,
+        "Water_Stress_Score": scores.water_stress_score,
+        "Risk_Category": scores.risk_category,
+        "Recommended_Action": scores.recommended_action,
+    }
+    if verify_stored:
+        for field, value in expected.items():
+            stored = record.get(field)
+            agrees = math.isclose(float(stored), float(value), abs_tol=1e-9) if field.endswith("_Score") else stored == value
+            if not agrees:
+                raise ValueError(f"Stored {field} disagrees with {SCORING_VERSION}: {stored!r} != {value!r}")
+    return {**record, **expected, "Score_Version": SCORING_VERSION, "Recommendation": scores.recommendation.__dict__}
 

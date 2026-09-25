@@ -1,4 +1,10 @@
-import { talukaNames } from "./talukaNames";
+import { riskLevelForScore } from "./dataContract.js";
+
+let configuredRiskThresholds = null;
+
+export function configureRiskThresholds(thresholds) {
+  configuredRiskThresholds = thresholds;
+}
 
 export const RISK_COLORS = {
   Low: "#34d399",
@@ -21,19 +27,29 @@ export function getWaterScore(item) {
   ];
 
   for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined || candidate === "") continue;
     const score = Number(candidate);
     if (Number.isFinite(score)) return score;
   }
 
-  return 0;
+  throw new TypeError("AquaLink record is missing a valid water stress score");
+}
+
+export function getStressScore(item, layer = "combined") {
+  const fields = {
+    combined: ["water_stress_score", "Water_Stress_Score"],
+    groundwater: ["groundwater_stress_score", "Groundwater_Stress_Score"],
+    supply: ["water_supply_gap_score", "Water_Supply_Gap_Score"],
+  };
+  for (const field of fields[layer] ?? fields.combined) {
+    const value = item?.[field];
+    if (value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))) return Number(value);
+  }
+  throw new TypeError(`AquaLink record is missing a valid ${layer} stress score`);
 }
 
 export function getRiskLevel(score) {
-  const value = Number(score || 0);
-  if (value >= 65) return "Critical";
-  if (value >= 45) return "High";
-  if (value >= 25) return "Moderate";
-  return "Low";
+  return riskLevelForScore(score, configuredRiskThresholds);
 }
 
 export function getRiskClass(riskOrScore) {
@@ -56,17 +72,16 @@ export function getTalukaName(itemOrName) {
         itemOrName?.taluka_name ??
         "Unknown Taluka";
 
-  const raw = String(rawValue || "Unknown Taluka").trim();
-  const directMatch = talukaNames[raw];
-  if (directMatch) return directMatch;
+  const raw = String(rawValue || "Unknown source area").trim();
+  return raw.replaceAll("_", " ");
+}
 
-  const caseInsensitiveKey = Object.keys(talukaNames).find(
-    (key) => key.toLowerCase() === raw.toLowerCase(),
-  );
-
-  return caseInsensitiveKey
-    ? talukaNames[caseInsensitiveKey]
-    : raw.replaceAll("_", " ");
+export function getLocationName(item) {
+  const sourceName = item?.village_ward ?? item?.Village_Ward;
+  if (sourceName) return String(sourceName).trim().replaceAll("_", " ");
+  if (item?.location_display_name) return String(item.location_display_name).trim().replaceAll("_", " ");
+  const id = Number(item?.location_id ?? item?.ID ?? item?.id);
+  return Number.isInteger(id) ? `Location ${String(id).padStart(5, "0")}` : "Unknown location";
 }
 
 export function normalizeLocation(item, index = 0) {

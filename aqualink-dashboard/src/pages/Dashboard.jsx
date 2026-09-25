@@ -9,6 +9,10 @@ import {
   Waves,
 } from "lucide-react";
 import FadeInUp from "../components/FadeInUp";
+import DataProvenance from "../components/DataProvenance";
+import YearSelector from "../components/YearSelector";
+import ConfidenceBadge from "../components/ConfidenceBadge";
+import { useSelectedYear } from "../context/useSelectedYear";
 import {
   EmptyState,
   LoadingState,
@@ -18,7 +22,8 @@ import {
   StatusBadge,
 } from "../components/ui";
 import { loadPuneData } from "../utils/loadAquaLinkData";
-import { getRiskLevel, getTalukaName, getWaterScore } from "../utils/waterMetrics";
+import { getLocationName, getRiskLevel, getTalukaName, getWaterScore } from "../utils/waterMetrics";
+import { aggregateRisk } from "../utils/riskAggregation";
 
 const riskCategories = ["Low", "Moderate", "High", "Critical"];
 
@@ -78,25 +83,40 @@ function RiskDistribution({ distribution, total }) {
           />
         ))}
       </div>
+      <table className="sr-only">
+        <caption>Location risk distribution</caption>
+        <thead><tr><th scope="col">Risk category</th><th scope="col">Locations</th><th scope="col">Percentage</th></tr></thead>
+        <tbody>
+          {riskCategories.map((risk) => (
+            <tr key={risk}><th scope="row">{risk}</th><td>{distribution[risk]}</td><td>{percentages[risk].toFixed(1)}%</td></tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }
 
 function Dashboard() {
+  const { selectedYear } = useSelectedYear();
   const [rawData, setRawData] = useState([]);
+  const [metadata, setMetadata] = useState(null);
+  const [aggregateQuality, setAggregateQuality] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
 
-    loadPuneData()
+    loadPuneData("pune", selectedYear)
       .then((result) => {
         if (!active) return;
         const records = Array.isArray(result)
           ? result
           : result?.data ?? result?.records ?? [];
         setRawData(records);
+        setMetadata(result.metadata);
+        setAggregateQuality(result.quality);
+        setError("");
       })
       .catch((loadError) => {
         console.error("Failed to load Pune data:", loadError);
@@ -109,7 +129,7 @@ function Dashboard() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedYear]);
 
   const dashboardData = useMemo(() => {
     const distribution = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
@@ -123,13 +143,12 @@ function Dashboard() {
         criticalTalukas: 0,
         distribution,
         talukas: [],
-        priorityTalukas: [],
+        priorityLocations: [],
       };
     }
 
-    rawData.forEach((item) => {
-      distribution[getRiskLevel(getWaterScore(item))] += 1;
-    });
+    const riskSummary = aggregateRisk(rawData);
+    Object.assign(distribution, riskSummary.counts);
 
     const talukaGroups = rawData.reduce((groups, item) => {
       const rawName = String(item?.Taluka ?? item?.taluka ?? "Unknown Taluka");
@@ -159,8 +178,17 @@ function Dashboard() {
       })
       .sort((a, b) => b.peakScore - a.peakScore || b.score - a.score);
 
-    const districtScore =
-      rawData.reduce((sum, item) => sum + getWaterScore(item), 0) / rawData.length;
+    const districtScore = riskSummary.averageScore;
+    const priorityLocations = [...rawData]
+      .sort((a, b) => getWaterScore(b) - getWaterScore(a))
+      .slice(0, 5)
+      .map((record) => ({
+        id: record.geography_id ?? record.location_id,
+        name: getLocationName(record),
+        sourceArea: getTalukaName(record),
+        score: getWaterScore(record),
+        risk: getRiskLevel(getWaterScore(record)),
+      }));
 
     return {
       totalLocations: rawData.length,
@@ -171,7 +199,7 @@ function Dashboard() {
       criticalTalukas: talukas.filter((item) => item.risk === "Critical").length,
       distribution,
       talukas,
-      priorityTalukas: talukas.slice(0, 5),
+      priorityLocations,
     };
   }, [rawData]);
 
@@ -206,7 +234,7 @@ function Dashboard() {
     highRiskTalukas,
     criticalTalukas,
     distribution,
-    priorityTalukas,
+    priorityLocations,
     talukas,
   } = dashboardData;
   const locationsRequiringAttention = distribution.High + distribution.Critical;
@@ -227,6 +255,9 @@ function Dashboard() {
         </div>
       </PageHeader>
 
+      <YearSelector metadata={metadata} />
+      <DataProvenance metadata={metadata} recordCount={totalLocations} />
+
       <FadeInUp>
         <section className="district-hero">
           <div className="hero-glow" aria-hidden="true" />
@@ -236,6 +267,7 @@ function Dashboard() {
               {districtScore}
               <span>/100</span>
             </div>
+            <ConfidenceBadge quality={aggregateQuality} label="aggregate confidence" detailed />
             <p>Average score across all monitored Pune District locations.</p>
             <div className="hero-status-row">
               <StatusBadge status={districtRisk} />
@@ -251,9 +283,9 @@ function Dashboard() {
 
       <FadeInUp delay={80}>
         <section className="metric-grid">
-          <MetricCard icon={MapPin} label="Talukas monitored" value={totalTalukas} detail="Unique talukas" />
-          <MetricCard icon={AlertTriangle} label="High-risk talukas" value={highRiskTalukas} detail="Contain a score of 45–64" tone="warning" />
-          <MetricCard icon={ShieldAlert} label="Critical talukas" value={criticalTalukas} detail="Contain a score of 65+" tone="danger" />
+          <MetricCard icon={MapPin} label="Source area identifiers" value={totalTalukas} detail="Dataset-provided grouping identifiers" />
+          <MetricCard icon={AlertTriangle} label="Areas containing high risk" value={highRiskTalukas} detail="Highest location risk is High" tone="warning" />
+          <MetricCard icon={ShieldAlert} label="Areas containing critical risk" value={criticalTalukas} detail="At least one Critical location" tone="danger" />
           <MetricCard icon={Radar} label="Monitored locations" value={totalLocations} detail="Latest source records" tone="blue" />
         </section>
       </FadeInUp>
@@ -262,8 +294,8 @@ function Dashboard() {
         <section className="surface-card dashboard-section">
           <SectionHeading
             eyebrow="Intervention priority"
-            title="Priority talukas"
-            description="Talukas containing the most severe monitored hotspots."
+            title="Priority locations"
+            description="The five exact dataset locations with the highest individual water-stress scores."
             meta="Top 5"
           />
           <div className="table-scroll">
@@ -271,18 +303,18 @@ function Dashboard() {
               <thead>
                 <tr>
                   <th scope="col">Rank</th>
-                  <th scope="col">Taluka</th>
-                  <th scope="col">Records</th>
+                  <th scope="col">Location</th>
+                  <th scope="col">Source area</th>
                   <th scope="col">Risk</th>
-                  <th scope="col">Avg score</th>
+                  <th scope="col">Score</th>
                 </tr>
               </thead>
               <tbody>
-                {priorityTalukas.map((item, index) => (
-                  <tr key={item.rawName}>
+                {priorityLocations.map((item, index) => (
+                  <tr key={item.id}>
                     <td><span className="rank-number">{String(index + 1).padStart(2, "0")}</span></td>
                     <td><strong>{item.name}</strong></td>
-                    <td>{item.records} records</td>
+                    <td>{item.sourceArea}</td>
                     <td><StatusBadge status={item.risk} /></td>
                     <td><strong>{item.score}</strong><span className="table-unit">/100</span></td>
                   </tr>
@@ -300,10 +332,10 @@ function Dashboard() {
       <FadeInUp>
         <section className="surface-card dashboard-section">
           <SectionHeading
-            eyebrow="Taluka overview"
-            title="Water stress by taluka"
-            description="Average water stress calculated from all available records."
-            meta={`${totalTalukas} talukas`}
+            eyebrow="Source-area overview"
+            title="Average water stress by source area identifier"
+            description="Average score across locations assigned to each dataset source area. These identifiers are not verified administrative talukas."
+            meta={`${totalTalukas} areas`}
           />
           <div className="taluka-chart">
             {talukas.map((item) => (
@@ -319,6 +351,11 @@ function Dashboard() {
               </div>
             ))}
           </div>
+          <table className="sr-only">
+            <caption>Average water stress by source area identifier</caption>
+            <thead><tr><th scope="col">Source area</th><th scope="col">Average score</th><th scope="col">Average risk</th><th scope="col">Highest location risk</th></tr></thead>
+            <tbody>{talukas.map((item) => <tr key={item.rawName}><th scope="row">{item.name}</th><td>{item.score}</td><td>{item.averageRisk}</td><td>{item.risk}</td></tr>)}</tbody>
+          </table>
           <div className="risk-legend" aria-label="Water stress risk thresholds">
             {riskCategories.map((risk) => (
               <span key={risk} className={`risk-${risk.toLowerCase()}`}>

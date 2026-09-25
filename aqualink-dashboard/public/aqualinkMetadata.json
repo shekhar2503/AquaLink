@@ -1,0 +1,19 @@
+{
+  "source_type": "bundled_csv",
+  "synthetic": true,
+  "scoring_version": "aqualink-score-v1.1.0",
+  "quality_methodology": {
+    "version": "aqualink-quality-v1.0.0",
+    "formula": "Weighted sum of six rule scores on a 0-100 scale.",
+    "weights": { "completeness": 0.25, "freshness": 0.15, "source_reliability": 0.2, "observation_count": 0.15, "spatial_accuracy": 0.15, "observation_status": 0.1 },
+    "confidence_thresholds": { "high_minimum": 80, "medium_minimum": 60, "low_maximum_exclusive": 60 },
+    "stale_after_years": 2,
+    "simulated_confidence_cap": "Medium"
+  },
+  "risk_thresholds": {
+    "Low": { "minimum": 0, "maximum": 25, "minimum_inclusive": true, "maximum_inclusive": false },
+    "Moderate": { "minimum": 25, "maximum": 45, "minimum_inclusive": true, "maximum_inclusive": false },
+    "High": { "minimum": 45, "maximum": 65, "minimum_inclusive": true, "maximum_inclusive": false },
+    "Critical": { "minimum": 65, "maximum": 100, "minimum_inclusive": true, "maximum_inclusive": true }
+  }
+}

@@ -6,6 +6,7 @@ import {
   Gauge,
   Search,
   ShieldAlert,
+  Download,
 } from "lucide-react";
 import {
   Bar,
@@ -21,6 +22,10 @@ import {
   YAxis,
 } from "recharts";
 import FadeInUp from "../components/FadeInUp";
+import DataProvenance from "../components/DataProvenance";
+import YearSelector from "../components/YearSelector";
+import ConfidenceBadge from "../components/ConfidenceBadge";
+import { useSelectedYear } from "../context/useSelectedYear";
 import {
   EmptyState,
   LoadingState,
@@ -29,9 +34,11 @@ import {
   SectionHeading,
   StatusBadge,
 } from "../components/ui";
-import { loadPuneData } from "../utils/loadAquaLinkData";
+import { loadPuneAllYears, loadPuneData } from "../utils/loadAquaLinkData";
+import { downloadRecordsCsv } from "../utils/csvExport";
 import {
   getRiskLevel,
+  getLocationName,
   getTalukaName,
   getWaterScore,
   RISK_COLORS,
@@ -46,7 +53,10 @@ const chartTooltipStyle = {
 };
 
 function Analytics() {
+  const { selectedYear } = useSelectedYear();
   const [data, setData] = useState([]);
+  const [metadata, setMetadata] = useState(null);
+  const [historicalRecords, setHistoricalRecords] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [riskFilter, setRiskFilter] = useState("All");
   const [loading, setLoading] = useState(true);
@@ -54,9 +64,14 @@ function Analytics() {
 
   useEffect(() => {
     let active = true;
-    loadPuneData()
-      .then((result) => {
-        if (active) setData(Array.isArray(result) ? result : []);
+    Promise.all([loadPuneData("pune", selectedYear), loadPuneAllYears()])
+      .then(([result, history]) => {
+        if (active) {
+          setData(result.records);
+          setMetadata(result.metadata);
+          setHistoricalRecords(history.records);
+          setError("");
+        }
       })
       .catch((loadError) => {
         console.error("Error loading analytics data:", loadError);
@@ -68,7 +83,7 @@ function Analytics() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedYear]);
 
   const analyticsData = useMemo(
     () =>
@@ -77,9 +92,10 @@ function Analytics() {
         return {
           id: `${item.location_id ?? index}-${index}`,
           taluka: getTalukaName(item),
-          village: item.Village_Ward || "Monitored location",
+          village: getLocationName(item),
           score,
           risk: getRiskLevel(score),
+          record: item,
         };
       }),
     [data],
@@ -114,6 +130,24 @@ function Analytics() {
     );
   }, [riskFilter, searchTerm, sortedData]);
 
+  const areaComparison = useMemo(() => {
+    if (!metadata || !historicalRecords.length) return [];
+    const year = metadata.selectedYear ?? metadata.latestYear;
+    const previousYear = year - 1;
+    const aggregate = (targetYear) => {
+      const groups = new Map();
+      historicalRecords.filter((record) => record.year === targetYear).forEach((record) => {
+        const id = record.geography_id ?? record.location_id;
+        const values = groups.get(id) ?? { name: getLocationName(record), scores: [] };
+        values.scores.push(record.water_stress_score); groups.set(id, values);
+      });
+      return [...groups.entries()].map(([id, value]) => ({ id, name: value.name, average: value.scores.reduce((sum, score) => sum + score, 0) / value.scores.length }))
+        .sort((a, b) => b.average - a.average).map((item, index) => ({ ...item, rank: index + 1 }));
+    };
+    const current = aggregate(year); const previous = new Map(aggregate(previousYear).map((item) => [item.id, item]));
+    return current.map((item) => ({ ...item, previousAverage: previous.get(item.id)?.average ?? null, previousRank: previous.get(item.id)?.rank ?? null, rankMovement: previous.has(item.id) ? previous.get(item.id).rank - item.rank : null }));
+  }, [historicalRecords, metadata]);
+
   if (loading) {
     return <div className="page-container"><LoadingState title="Loading water analytics" /></div>;
   }
@@ -127,7 +161,7 @@ function Analytics() {
   }
 
   const riskDistribution = Object.entries(summary.counts).map(([name, value]) => ({ name, value }));
-  const topTen = sortedData.slice(0, 10).map((item) => ({ ...item, name: item.taluka }));
+  const topTen = sortedData.slice(0, 10).map((item) => ({ ...item, name: item.village }));
   const priorityPercentage = ((summary.priorityCount / analyticsData.length) * 100).toFixed(1);
 
   return (
@@ -140,11 +174,14 @@ function Analytics() {
         <div className="data-state-pill"><span className="live-dot" /><div><strong>Dataset active</strong><small>{analyticsData.length} locations</small></div></div>
       </PageHeader>
 
+      <YearSelector metadata={metadata} />
+      <DataProvenance metadata={metadata} recordCount={analyticsData.length} />
+
       <FadeInUp>
         <section className="metric-grid">
           <MetricCard icon={Gauge} label="Average stress" value={summary.average.toFixed(1)} suffix="/100" detail="District-wide average" />
-          <MetricCard icon={CircleCheck} label="Low risk" value={summary.counts.Low} detail="Score below 25" tone="success" />
-          <MetricCard icon={AlertTriangle} label="High risk" value={summary.counts.High} detail="Score 45–64" tone="warning" />
+          <MetricCard icon={CircleCheck} label="Low risk" value={summary.counts.Low} detail="Backend-classified locations" tone="success" />
+          <MetricCard icon={AlertTriangle} label="High risk" value={summary.counts.High} detail="Backend-classified locations" tone="warning" />
           <MetricCard icon={ShieldAlert} label="Critical" value={summary.counts.Critical} detail="Requires action" tone="danger" />
         </section>
       </FadeInUp>
@@ -164,6 +201,7 @@ function Analytics() {
             </ResponsiveContainer>
             <div className="pie-center"><strong>{analyticsData.length}</strong><span>Locations</span></div>
           </div>
+          <table className="sr-only"><caption>Risk distribution</caption><tbody>{riskDistribution.map((item) => <tr key={item.name}><th>{item.name}</th><td>{item.value}</td></tr>)}</tbody></table>
         </FadeInUp>
 
         <FadeInUp className="surface-card chart-card" delay={80}>
@@ -181,8 +219,13 @@ function Analytics() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+          <table className="sr-only"><caption>Ten highest-risk locations</caption><tbody>{topTen.map((item) => <tr key={item.id}><th>{item.village}</th><td>{item.score}</td></tr>)}</tbody></table>
         </FadeInUp>
       </section>
+
+      <FadeInUp><section className="surface-card analytics-table-card"><SectionHeading eyebrow="Historical comparison" title="Location rank movement" description="Current-year location stress and movement from the preceding year; positive movement means the location moved toward higher priority." />
+        <div className="table-scroll"><table className="data-table"><thead><tr><th>Current rank</th><th>Location</th><th>Current score</th><th>Previous score</th><th>Rank movement</th></tr></thead><tbody>{areaComparison.map((item) => <tr key={item.id}><td>{item.rank}</td><td>{item.name}</td><td>{item.average.toFixed(1)}</td><td>{item.previousAverage === null ? "Not available" : item.previousAverage.toFixed(1)}</td><td>{item.rankMovement === null ? "Not available" : item.rankMovement === 0 ? "No change" : `${item.rankMovement > 0 ? "+" : ""}${item.rankMovement}`}</td></tr>)}</tbody></table></div>
+      </section></FadeInUp>
 
       <FadeInUp>
         <section className="decision-banner">
@@ -202,6 +245,7 @@ function Analytics() {
           <div className="table-card-header">
             <SectionHeading eyebrow="Location intelligence" title="Water stress records" description={`Complete dataset — ${analyticsData.length} monitored locations.`} />
             <div className="table-controls">
+              <button className="export-button" type="button" onClick={() => downloadRecordsCsv(filteredData.map((item) => item.record), `aqualink-${metadata.selectedYear ?? metadata.latestYear}-filtered.csv`)}><Download size={16} aria-hidden="true" />Export filtered CSV</button>
               <label className="field-group field-grow">
                 <span>Search locations</span>
                 <div className="input-with-icon"><Search size={17} aria-hidden="true" /><input type="search" placeholder="Search taluka or village" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} /></div>
@@ -221,13 +265,14 @@ function Analytics() {
           <p className="table-result-count">Showing <strong>{filteredData.length}</strong> of <strong>{analyticsData.length}</strong> locations</p>
           <div className="table-scroll">
             <table className="data-table analytics-table">
-              <thead><tr><th scope="col">#</th><th scope="col">Location</th><th scope="col">Stress score</th><th scope="col">Risk level</th><th scope="col">Stress index</th><th scope="col">Priority</th></tr></thead>
+              <thead><tr><th scope="col">#</th><th scope="col">Location</th><th scope="col">Stress score</th><th scope="col">Confidence</th><th scope="col">Risk level</th><th scope="col">Stress index</th><th scope="col">Priority</th></tr></thead>
               <tbody>
                 {filteredData.map((item, index) => (
                   <tr key={item.id}>
                     <td>{index + 1}</td>
-                    <td><div className="table-primary"><strong>{item.taluka}</strong><span>{item.village}</span></div></td>
+                    <td><div className="table-primary"><strong>{item.village}</strong><span>{item.taluka}</span></div></td>
                     <td><strong style={{ color: RISK_COLORS[item.risk] }}>{item.score}</strong><span className="table-unit">/100</span></td>
+                    <td><ConfidenceBadge quality={item.record.quality} /></td>
                     <td><StatusBadge status={item.risk} /></td>
                     <td><div className="stress-track"><span style={{ width: `${Math.max(item.score, 2)}%`, background: RISK_COLORS[item.risk] }} /></div></td>
                     <td><span className={`priority-label ${item.risk.toLowerCase()}`}>{item.risk === "Critical" ? "Immediate" : item.risk === "High" ? "Priority" : item.risk === "Moderate" ? "Monitor" : "Stable"}</span></td>

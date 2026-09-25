@@ -1,130 +1,146 @@
-"""
-AquaLink IoT Telemetry & Simulation Router
-==========================================
-Provides real-time IoT sensor telemetry ingestion, simulation daemon triggers,
-and live field monitoring endpoints.
+"""Persistent SQLite-backed IoT telemetry API.
 
-Target Hardware Architecture:
-Submersible Pressure Transducer (Groundwater) + 0-1.2 MPa Transducer (Pressure) + YF-S201 (Flow)
-ESP32 -> LoRaWAN -> Gateway -> LoRaWAN Network Server -> MQTT/HTTP -> FastAPI (/api/iot/telemetry)
+HTTP ingestion is implemented. No MQTT broker, LoRaWAN server, or live hardware
+connection is claimed by this module.
 """
 
 from __future__ import annotations
+
 import random
-from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Query, Body
-from pydantic import BaseModel, Field
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field, model_validator
+
+from app.core.iot_repository import (
+    DeviceConflictError,
+    DuplicateTelemetryError,
+    IoTRepository,
+    LocationNotFoundError,
+)
 
 router = APIRouter(prefix="/api/iot", tags=["IoT Integration"])
-
-# In-memory storage for active live telemetry (augmented with database persistence)
-LIVE_TELEMETRY_STORE: dict[str, dict] = {}
-SIMULATION_ACTIVE: bool = False
+repository = IoTRepository()
+DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{2,63}$")
+MAX_FUTURE_SKEW = timedelta(minutes=5)
+MAX_READING_AGE = timedelta(days=7)
 
 
 class IoTTelemetryPayload(BaseModel):
-    device_id: str = Field(..., example="GW_001")
-    location_id: int = Field(..., example=101)
-    groundwater_level: float = Field(..., ge=0.0, le=150.0, description="Depth to water table in mbgl")
-    pipeline_pressure: float = Field(..., ge=0.0, le=15.0, description="Pipeline pressure in bar / MPa")
-    flow_rate: float = Field(..., ge=0.0, le=1000.0, description="Water flow rate in L/min")
-    battery_voltage: float | None = Field(default=3.7, ge=0.0, le=5.0)
-    is_simulated: bool = Field(default=False)
-    timestamp: str | None = None
+    device_id: str = Field(min_length=3, max_length=64, examples=["GW-PUNE-001"])
+    location_id: int = Field(gt=0, examples=[101])
+    groundwater_level: float = Field(ge=0.0, le=150.0, description="Depth to water table in mbgl")
+    pipeline_pressure: float = Field(ge=0.0, le=15.0, description="Pipeline pressure in bar")
+    flow_rate: float = Field(ge=0.0, le=1000.0, description="Water flow rate in L/min")
+    battery_voltage: float | None = Field(default=None, ge=0.0, le=5.0)
+    source_type: Literal["live_hardware", "simulation"] | None = None
+    is_simulated: bool | None = Field(default=None, description="Compatibility field; source_type is authoritative")
+    timestamp: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_identity_and_source(self):
+        if not DEVICE_ID_PATTERN.fullmatch(self.device_id):
+            raise ValueError("device_id must use 3-64 letters, numbers, dots, colons, underscores, or hyphens")
+        derived = "simulation" if self.is_simulated else "live_hardware"
+        if self.source_type is not None and self.is_simulated is not None and self.source_type != derived:
+            raise ValueError("source_type and is_simulated disagree")
+        source = self.source_type or derived
+        if source == "simulation" and not self.device_id.startswith("SIM-"):
+            raise ValueError("simulation device_id values must start with 'SIM-'")
+        if source == "live_hardware" and self.device_id.startswith("SIM-"):
+            raise ValueError("live hardware device_id values cannot start with 'SIM-'")
+        self.source_type = source
+        self.is_simulated = source == "simulation"
+        if self.timestamp is not None and self.timestamp.tzinfo is None:
+            raise ValueError("timestamp must include a timezone offset")
+        return self
+
+
+def _telemetry_status(payload: IoTTelemetryPayload) -> str:
+    if payload.groundwater_level > 100.0:
+        return "CRITICAL_DEPLETION"
+    if payload.pipeline_pressure < 0.2:
+        return "LOW_PRESSURE_WARNING"
+    if payload.flow_rate == 0.0:
+        return "NO_FLOW"
+    return "NORMAL"
+
+
+def ingest_telemetry(payload: IoTTelemetryPayload):
+    """Validate and persist one HTTP telemetry reading in SQLite."""
+    received_at = datetime.now(timezone.utc)
+    observed_at = (payload.timestamp or received_at).astimezone(timezone.utc)
+    if observed_at > received_at + MAX_FUTURE_SKEW:
+        raise HTTPException(status_code=422, detail="timestamp is more than 5 minutes in the future")
+    if observed_at < received_at - MAX_READING_AGE:
+        raise HTTPException(status_code=422, detail="timestamp is more than 7 days old")
+    try:
+        record = repository.save_reading({
+            "device_id": payload.device_id, "location_id": payload.location_id,
+            "groundwater_level": payload.groundwater_level,
+            "pipeline_pressure": payload.pipeline_pressure, "flow_rate": payload.flow_rate,
+            "battery_voltage": payload.battery_voltage, "source_type": payload.source_type,
+            "telemetry_status": _telemetry_status(payload), "observed_at": observed_at,
+            "received_at": received_at,
+        })
+    except LocationNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except DuplicateTelemetryError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except DeviceConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"status": "success", "message": "Telemetry persisted in SQLite", "record": record}
 
 
 @router.post("/telemetry")
-def ingest_telemetry(payload: IoTTelemetryPayload):
-    """
-    Ingests live telemetry from LoRaWAN application server MQTT/HTTP bridge.
-    Validates physical sensor ranges and logs readings to DB.
-    """
-    # Range & Quality Checks
-    if payload.groundwater_level > 100.0:
-        status = "CRITICAL_DEPLETION"
-    elif payload.pipeline_pressure < 0.2:
-        status = "LOW_PRESSURE_WARNING"
-    elif payload.flow_rate == 0.0:
-        status = "NO_FLOW"
-    else:
-        status = "NORMAL"
-
-    rec = {
-        "device_id": payload.device_id,
-        "location_id": payload.location_id,
-        "groundwater_level_mbgl": payload.groundwater_level,
-        "pipeline_pressure_bar": payload.pipeline_pressure,
-        "flow_rate_lpm": payload.flow_rate,
-        "battery_voltage": payload.battery_voltage or 3.7,
-        "status": status,
-        "is_simulated": payload.is_simulated,
-        "data_source": "Simulated IoT Data" if payload.is_simulated else "Field Hardware Transducer (LoRaWAN)",
-        "timestamp": payload.timestamp or datetime.now(timezone.utc).isoformat(),
-    }
-
-    LIVE_TELEMETRY_STORE[str(payload.location_id)] = rec
-    return {
-        "status": "success",
-        "message": "Telemetry received and validated",
-        "record": rec,
-    }
+def ingest_telemetry_endpoint(payload: IoTTelemetryPayload):
+    return ingest_telemetry(payload)
 
 
 @router.post("/simulate")
-def toggle_simulation(
-    count: int = Query(default=10, le=100, description="Number of locations to simulate readings for"),
-):
-    """
-    Generates realistic simulated IoT telemetry across monitored locations for SIH demo testing.
-    Clearly tags generated data as 'Simulated IoT Data'.
-    """
-    global SIMULATION_ACTIVE
-    SIMULATION_ACTIVE = True
+def simulate_telemetry(count: int = Query(default=10, ge=1, le=100)):
+    """Explicitly generate and persist labelled simulation readings for Pune locations."""
+    location_ids = repository.sample_location_ids(count, "Pune")
+    if not location_ids:
+        raise HTTPException(status_code=503, detail="No Pune locations are available for simulation")
     generated = []
-
-    # Seed 10 Pune/Maharashtra location IDs
-    sample_locations = [1, 2, 5, 12, 18, 24, 30, 42, 55, 60]
-    for loc_id in sample_locations[:count]:
-        gw_depth = round(random.uniform(4.5, 28.0), 2)
-        pressure = round(random.uniform(0.35, 1.15), 2)
-        flow = round(random.uniform(12.0, 45.0), 1)
-
+    base_time = datetime.now(timezone.utc)
+    for index, location_id in enumerate(location_ids):
         payload = IoTTelemetryPayload(
-            device_id=f"ESP32_LORA_{loc_id:03d}",
-            location_id=loc_id,
-            groundwater_level=gw_depth,
-            pipeline_pressure=pressure,
-            flow_rate=flow,
-            is_simulated=True,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            device_id=f"SIM-ESP32-{location_id:05d}", location_id=location_id,
+            groundwater_level=round(random.uniform(4.5, 28.0), 2),
+            pipeline_pressure=round(random.uniform(0.35, 1.15), 2),
+            flow_rate=round(random.uniform(12.0, 45.0), 1), battery_voltage=3.7,
+            source_type="simulation", timestamp=base_time + timedelta(microseconds=index),
         )
-        res = ingest_telemetry(payload)
-        generated.append(res["record"])
-
+        generated.append(ingest_telemetry(payload)["record"])
     return {
-        "status": "success",
-        "simulation_active": True,
-        "generated_count": len(generated),
+        "status": "success", "simulation_active": True,
+        "data_source": "explicit_simulation", "generated_count": len(generated),
         "telemetry_sample": generated,
+        "notice": "Generated readings are persisted separately from live hardware data.",
     }
 
 
 @router.get("/live")
-def get_live_telemetry(location_id: int | None = Query(default=None)):
-    """
-    Returns latest live IoT sensor telemetry.
-    """
-    if location_id is not None:
-        rec = LIVE_TELEMETRY_STORE.get(str(location_id))
-        if not rec:
-            return {
-                "location_id": location_id,
-                "has_iot_device": False,
-                "message": "No active IoT telemetry received for this location yet",
-            }
-        return {"has_iot_device": True, "telemetry": rec}
-
-    return {
-        "active_devices_count": len(LIVE_TELEMETRY_STORE),
-        "devices": list(LIVE_TELEMETRY_STORE.values()),
+def get_live_telemetry(
+    location_id: int | None = Query(default=None, gt=0),
+    source_type: Literal["live_hardware", "simulation", "all"] = Query(default="live_hardware"),
+):
+    """Return the latest persisted reading per device using indexed SQLite queries."""
+    devices = repository.latest_devices(source_type=source_type, location_id=location_id)
+    response = {
+        "storage": "sqlite", "transport": "http_ingestion_only",
+        "source_filter": source_type, "device_count": len(devices),
+        "active_devices_count": sum(device["device_health"] != "stale" for device in devices),
+        "stale_devices_count": sum(device["device_health"] == "stale" for device in devices),
+        "devices": devices,
     }
+    if location_id is not None:
+        response.update({
+            "location_id": location_id, "has_iot_device": bool(devices),
+            "message": None if devices else "No persisted telemetry matches this location and source filter",
+        })
+    return response

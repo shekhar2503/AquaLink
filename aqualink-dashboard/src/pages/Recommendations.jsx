@@ -10,6 +10,10 @@ import {
   Sprout,
 } from "lucide-react";
 import FadeInUp from "../components/FadeInUp";
+import DataProvenance from "../components/DataProvenance";
+import YearSelector from "../components/YearSelector";
+import ConfidenceBadge from "../components/ConfidenceBadge";
+import { useSelectedYear } from "../context/useSelectedYear";
 import {
   EmptyState,
   LoadingState,
@@ -19,51 +23,7 @@ import {
   StatusBadge,
 } from "../components/ui";
 import { loadPuneData } from "../utils/loadAquaLinkData";
-import { getRiskLevel, getTalukaName, getWaterScore } from "../utils/waterMetrics";
-
-function getRecommendation(area) {
-  if (area?.Recommended_Action) {
-    return {
-      action: area.Recommended_Action,
-      reason: `Targeted intervention based on the recorded groundwater extraction stage (${area.GW_Extraction_Stage_pct ?? "N/A"}%) and piped coverage (${area.Piped_Water_Coverage_pct ?? "N/A"}%).`,
-    };
-  }
-
-  const groundwaterStage = Number(area?.GW_Extraction_Stage_pct || 0);
-  const coverage = Number(area?.Piped_Water_Coverage_pct || 100);
-  const isDeclining = String(area?.GW_Historical_Trend || "Stable").includes("Declining");
-
-  if (groundwaterStage >= 90 && coverage < 75) {
-    return {
-      action: "Groundwater recharge + water-supply augmentation",
-      reason: "Compound stress detected: high groundwater extraction with a piped water-supply shortfall.",
-    };
-  }
-  if (groundwaterStage >= 90) {
-    return {
-      action: isDeclining
-        ? "Urgent groundwater recharge and extraction controls"
-        : "Groundwater conservation and extraction management",
-      reason: "Groundwater extraction exceeds safety norms and calls for recharge structures and improved irrigation efficiency.",
-    };
-  }
-  if (coverage < 75) {
-    return {
-      action: "Improve piped water-supply infrastructure",
-      reason: "Below-norm piped supply coverage indicates a need for distribution network expansion.",
-    };
-  }
-  if (isDeclining) {
-    return {
-      action: "Increase water-table monitoring and rainwater harvesting",
-      reason: "The declining five-year water-table trend indicates emerging vulnerability.",
-    };
-  }
-  return {
-    action: "Monitor and maintain",
-    reason: "Current indicators remain within baseline safety thresholds.",
-  };
-}
+import { getLocationName, getRiskLevel, getTalukaName, getWaterScore } from "../utils/waterMetrics";
 
 const districtStrategies = [
   {
@@ -89,15 +49,23 @@ const districtStrategies = [
 ];
 
 function Recommendations() {
+  const { selectedYear } = useSelectedYear();
   const [data, setData] = useState([]);
+  const [scoreVersion, setScoreVersion] = useState("");
+  const [metadata, setMetadata] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    loadPuneData()
+    loadPuneData("pune", selectedYear)
       .then((result) => {
-        if (active) setData(Array.isArray(result) ? result : []);
+        if (active) {
+          setData(result.records);
+          setScoreVersion(result.metadata.scoringVersion);
+          setMetadata(result.metadata);
+          setError("");
+        }
       })
       .catch((loadError) => {
         console.error("Error loading recommendation data:", loadError);
@@ -109,7 +77,7 @@ function Recommendations() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedYear]);
 
   const summary = useMemo(() => {
     const ranked = [...data].sort((a, b) => getWaterScore(b) - getWaterScore(a));
@@ -145,6 +113,9 @@ function Recommendations() {
         <div className="method-badge"><Route size={16} aria-hidden="true" /><span>AquaLink DSS</span></div>
       </PageHeader>
 
+      <YearSelector metadata={metadata} />
+      <DataProvenance metadata={metadata} recordCount={data.length} />
+
       <FadeInUp>
         <section className="metric-grid recommendation-metrics">
           <MetricCard icon={Gauge} label="Average stress" value={summary.average.toFixed(1)} suffix="/100" detail="District average" />
@@ -165,17 +136,26 @@ function Recommendations() {
             {summary.ranked.slice(0, 6).map((area, index) => {
               const score = getWaterScore(area);
               const risk = getRiskLevel(score);
-              const recommendation = getRecommendation(area);
+              const recommendation = area.recommendation;
               return (
                 <article className="recommendation-card" key={`${area.location_id ?? area.Taluka}-${index}`}>
                   <div className="recommendation-card-top">
-                    <div><span className="eyebrow">Priority {String(index + 1).padStart(2, "0")}</span><h2>{getTalukaName(area)}</h2><p>{area.Village_Ward || "Monitored location"}</p></div>
+                    <div><span className="eyebrow">Priority {String(index + 1).padStart(2, "0")}</span><h2>{getLocationName(area)}</h2><p>{getTalukaName(area)}</p></div>
                     <div className="recommendation-score"><strong>{score}</strong><span>/100</span></div>
                   </div>
                   <div className="recommendation-risk-row"><span>Risk level</span><StatusBadge status={risk} /></div>
-                  <div className="recommendation-action"><span>Recommended action</span><strong>{recommendation.action}</strong></div>
-                  <p className="recommendation-reason">{recommendation.reason}</p>
-                  <div className="recommendation-footer"><span>Source record</span><strong>{area.Year ? `Year ${area.Year}` : "Latest available"}</strong></div>
+                  <ConfidenceBadge quality={area.quality} label="recommendation confidence" detailed />
+                  <div className="recommendation-action"><span>Recommended action</span><strong>{recommendation.recommended_action}</strong></div>
+                  <p className="recommendation-reason">{recommendation.rationale}</p>
+                  <div className="recommendation-drivers"><span>Decision drivers</span><div>{recommendation.drivers.map((driver) => <strong key={driver}>{driver.replaceAll("_", " ")}</strong>)}</div></div>
+                  <dl className="implementation-details">
+                    <div><dt>Urgency</dt><dd>{recommendation.priority}</dd></div>
+                    <div><dt>Estimated cost</dt><dd data-placeholder>Not estimated — placeholder</dd></div>
+                    <div><dt>Expected impact</dt><dd data-placeholder>Not quantified — placeholder</dd></div>
+                    <div><dt>Responsible department</dt><dd data-placeholder>Unassigned — placeholder</dd></div>
+                    <div><dt>Implementation status</dt><dd data-placeholder>Not tracked — placeholder</dd></div>
+                  </dl>
+                  <div className="recommendation-footer"><span>Source record</span><strong>{area.Year ? `Year ${area.Year}` : "Latest available"} · {area.score_version || scoreVersion}</strong></div>
                 </article>
               );
             })}

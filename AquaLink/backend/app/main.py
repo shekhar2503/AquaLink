@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import districts, hotspots, village, rankings, forecast, iot
+from app.routers import districts, hotspots, village, rankings, forecast, iot, metadata
 from app.core import data as data_layer, db
+from app.core.engine import risk_thresholds_metadata
 
 app = FastAPI(
     title="AquaLink API",
@@ -24,7 +25,7 @@ def on_startup():
     try:
         db.init_db()
     except Exception as e:
-        print(f"[AquaLink DB Init Notice] SQLite/Postgres auto-seed notice: {e}")
+        print(f"[AquaLink DB Init Error] SQLite initialization failed: {e}")
 
 app.include_router(districts.router)
 app.include_router(hotspots.router)
@@ -32,6 +33,7 @@ app.include_router(village.router)
 app.include_router(rankings.router)
 app.include_router(forecast.router)
 app.include_router(iot.router)
+app.include_router(metadata.router)
 
 
 @app.get("/")
@@ -41,18 +43,12 @@ def root():
         "status": "ok",
         "version": "1.0.0",
         "docs": "/docs",
-        "risk_thresholds": {
-            "Low": "0 <= Score < 25",
-            "Moderate": "25 <= Score < 45",
-            "High": "45 <= Score < 65",
-            "Critical": "65 <= Score <= 100",
-            "standard_type": "AquaLink project-defined risk classification thresholds",
-        },
+        "risk_thresholds": risk_thresholds_metadata(),
         "endpoints": [
             "/districts", "/districts/summary", "/hotspots",
             "/village/{id}", "/village/{id}/explain", "/rankings",
             "/api/forecast/location/{id}", "/api/forecast/district",
-            "/api/iot/telemetry", "/api/iot/simulate", "/api/iot/live"
+            "/api/iot/telemetry", "/api/iot/simulate", "/api/iot/live", "/metadata"
         ],
     }
 
@@ -65,7 +61,9 @@ def health():
         "rows_loaded": len(df),
         "districts": df.District.nunique(),
         "years": sorted(df.Year.unique().tolist()),
-        "target_database": "PostgreSQL + PostGIS (Development mode fallback to SQLite)",
-        "iot_layer": "Active",
+        "database": "SQLite",
+        "iot_layer": "Persistent SQLite telemetry via HTTP ingestion",
+        "mqtt_active": False,
+        "postgis_active": False,
     }
 

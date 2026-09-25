@@ -9,6 +9,9 @@ import {
   Target,
 } from "lucide-react";
 import FadeInUp from "../components/FadeInUp";
+import DataProvenance from "../components/DataProvenance";
+import YearSelector from "../components/YearSelector";
+import { useSelectedYear } from "../context/useSelectedYear";
 import RiskMap from "../components/RiskMap";
 import {
   EmptyState,
@@ -18,20 +21,27 @@ import {
   SectionHeading,
 } from "../components/ui";
 import { loadPuneData } from "../utils/loadAquaLinkData";
-import { getRiskLevel, getTalukaName, getWaterScore } from "../utils/waterMetrics";
+import { getLocationName, getRiskLevel, getStressScore } from "../utils/waterMetrics";
 
 function MapPage() {
+  const { selectedYear } = useSelectedYear();
   const [data, setData] = useState([]);
+  const [metadata, setMetadata] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRisk, setSelectedRisk] = useState("All");
+  const [stressLayer, setStressLayer] = useState("combined");
 
   useEffect(() => {
     let active = true;
-    loadPuneData()
+    loadPuneData("pune", selectedYear)
       .then((result) => {
-        if (active) setData(Array.isArray(result) ? result : []);
+        if (active) {
+          setData(result.records);
+          setMetadata(result.metadata);
+          setError("");
+        }
       })
       .catch((loadError) => {
         console.error("Error loading map data:", loadError);
@@ -43,30 +53,30 @@ function MapPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedYear]);
 
   const filteredData = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     return data.filter((item) => {
-      const risk = getRiskLevel(getWaterScore(item));
-      const searchableName = `${getTalukaName(item)} ${item.Village_Ward || ""}`.toLowerCase();
+      const risk = getRiskLevel(getStressScore(item, stressLayer));
+      const searchableName = `${item.area_group_display_name} ${getLocationName(item)}`.toLowerCase();
       return (
         (selectedRisk === "All" || risk === selectedRisk) &&
         (!query || searchableName.includes(query))
       );
     });
-  }, [data, searchTerm, selectedRisk]);
+  }, [data, searchTerm, selectedRisk, stressLayer]);
 
   const summary = useMemo(() => {
     const counts = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
     data.forEach((item) => {
-      counts[getRiskLevel(getWaterScore(item))] += 1;
+      counts[getRiskLevel(getStressScore(item, stressLayer))] += 1;
     });
     const average = data.length
-      ? data.reduce((sum, item) => sum + getWaterScore(item), 0) / data.length
+      ? data.reduce((sum, item) => sum + getStressScore(item, stressLayer), 0) / data.length
       : 0;
     return { counts, average };
-  }, [data]);
+  }, [data, stressLayer]);
 
   if (loading) {
     return <div className="page-container"><LoadingState title="Loading Pune risk map" /></div>;
@@ -90,10 +100,13 @@ function MapPage() {
         <div className="data-state-pill"><span className="live-dot" /><div><strong>Spatial layer active</strong><small>{data.length} mapped records</small></div></div>
       </PageHeader>
 
+      <YearSelector metadata={metadata} />
+      <DataProvenance metadata={metadata} recordCount={data.length} />
+
       <FadeInUp>
         <section className="metric-grid map-metric-grid">
           <MetricCard icon={MapPinned} label="Monitored locations" value={data.length} detail="Pune District" />
-          <MetricCard icon={ShieldCheck} label="Low risk" value={summary.counts.Low} detail="Score below 25" tone="success" />
+          <MetricCard icon={ShieldCheck} label="Low risk" value={summary.counts.Low} detail="Backend-classified locations" tone="success" />
           <MetricCard icon={AlertTriangle} label="High + critical" value={summary.counts.High + summary.counts.Critical} detail="Priority locations" tone="danger" />
           <MetricCard icon={BarChart3} label="Average stress" value={summary.average.toFixed(1)} suffix="/100" detail="District average" tone="blue" />
         </section>
@@ -108,6 +121,12 @@ function MapPage() {
             meta={`${filteredData.length} of ${data.length} shown`}
           />
 
+          <div className="map-layer-toggle" aria-label="Map layer">
+            {[['combined', 'Combined stress'], ['groundwater', 'Groundwater stress'], ['supply', 'Supply-gap stress']].map(([value, label]) => <button key={value} type="button" className={stressLayer === value ? "is-active" : ""} aria-pressed={stressLayer === value} onClick={() => setStressLayer(value)}>{label}</button>)}
+            <button type="button" disabled title="No sourced taluka boundary GeoJSON is available">Taluka choropleth unavailable</button>
+            <span>Taluka boundaries are not enabled because the repository has no sourced, usable taluka GeoJSON.</span>
+          </div>
+
           <div className="filter-bar">
             <label className="field-group field-grow">
               <span>Search location</span>
@@ -115,7 +134,7 @@ function MapPage() {
                 <Search size={17} aria-hidden="true" />
                 <input
                   type="search"
-                  placeholder="Search taluka or village"
+                  placeholder="Search source area or location"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
                 />
@@ -136,7 +155,7 @@ function MapPage() {
             </label>
           </div>
 
-          <RiskMap data={filteredData} />
+          <RiskMap data={filteredData} metadata={metadata} selectedYear={metadata?.selectedYear} stressLayer={stressLayer} />
         </section>
       </FadeInUp>
 
