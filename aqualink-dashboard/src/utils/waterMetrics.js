@@ -1,6 +1,8 @@
 import { riskLevelForScore } from "./dataContract.js";
+import { talukaNames } from "./talukaNames.js";
 
 let configuredRiskThresholds = null;
+
 
 export function configureRiskThresholds(thresholds) {
   configuredRiskThresholds = thresholds;
@@ -73,6 +75,7 @@ export function getTalukaName(itemOrName) {
         "Unknown Taluka";
 
   const raw = String(rawValue || "Unknown source area").trim();
+  if (talukaNames[raw]) return talukaNames[raw];
   return raw.replaceAll("_", " ");
 }
 
